@@ -1,3 +1,4 @@
+{% raw %}
 # Spotify Tesla Clone — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -2239,3 +2240,4 @@ export default function OAuthCallback() {
 2. **Placeholder scan:** The auth client ID in `src/services/auth.ts` and `src/pages/Home.tsx` is intentionally left empty (user must configure their own Google Cloud API credentials). All other code is complete.
 3. **Type consistency:** All types from `src/types/index.ts` are used consistently across services, store, and components.
 4. **No missing tasks:** Everything from the spec has a corresponding task.
+{% endraw %}
