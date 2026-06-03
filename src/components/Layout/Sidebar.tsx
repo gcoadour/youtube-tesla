@@ -1,13 +1,22 @@
 import { NavLink } from 'react-router-dom'
 import { usePlayerStore } from '../../store/playerStore'
-import { HomeIcon, SearchIcon, LibraryIcon, SettingsIcon } from '../common/Icons'
+import { HomeIcon, SearchIcon, LibraryIcon, SettingsIcon, CloseIcon } from '../common/Icons'
 
-export default function Sidebar() {
+interface Props {
+  onClose?: () => void
+}
+
+export default function Sidebar({ onClose }: Props) {
   const playlists = usePlayerStore((s) => s.playlists)
 
   return (
     <aside className="sidebar">
-      <div className="sidebar-logo">Spotify</div>
+      <div className="sidebar-header">
+        <div className="sidebar-logo">Spotify</div>
+        <button className="sidebar-close" onClick={onClose} aria-label="Close menu">
+          <CloseIcon size={24} />
+        </button>
+      </div>
       <nav className="sidebar-nav">
         <NavLink to="/" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
           <HomeIcon size={22} />

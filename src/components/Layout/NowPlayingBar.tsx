@@ -8,13 +8,17 @@ export default function NowPlayingBar() {
   const currentTrack = usePlayerStore((s) => s.currentTrack)
   const likedTracks = usePlayerStore((s) => s.likedTracks)
   const toggleLikeTrack = usePlayerStore((s) => s.toggleLikeTrack)
+  const progress = usePlayerStore((s) => s.progress)
+  const duration = usePlayerStore((s) => s.duration)
 
   if (!currentTrack) return null
 
   const isLiked = likedTracks.has(currentTrack.id)
+  const percent = duration ? (progress / duration) * 100 : 0
 
   return (
-    <footer className="now-playing-bar">
+    <footer className="now-playing-bar" style={{ '--npb-progress': `${percent}%` } as React.CSSProperties}>
+      <div className="npb-progress-track" />
       <div className="npb-left">
         <img
           className="npb-cover"
