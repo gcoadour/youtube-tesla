@@ -103,6 +103,36 @@ export async function resolveChannel(input: string): Promise<ChannelInfo | null>
   }
 }
 
+export async function fetchChannelPlaylists(channelId: string): Promise<Playlist[]> {
+  const playlists: Playlist[] = []
+  let continuation: string | undefined
+
+  do {
+    let url = `${CORS_INSTANCE}/channels/${channelId}/playlists?sort=oldest`
+    if (continuation) url += `&continuation=${encodeURIComponent(continuation)}`
+    const res = await fetch(url)
+    if (!res.ok) throw new Error(`Channel playlists error: ${res.status}`)
+    const data = await res.json()
+    const items = data.playlists || data || []
+
+    for (const item of items) {
+      if (item.playlistId?.startsWith('LL')) continue
+      playlists.push({
+        id: item.playlistId || item.id,
+        title: item.title || 'Untitled',
+        description: item.description || '',
+        thumbnail: item.thumbnailUrl || item.thumbnails?.[0]?.url || '',
+        tracks: [],
+        source: 'youtube',
+      })
+    }
+
+    continuation = data.continuation
+  } while (continuation)
+
+  return playlists
+}
+
 export async function fetchPlaylistById(playlistId: string): Promise<Playlist> {
   try {
     return await fetchPlaylistInvidious(playlistId)
