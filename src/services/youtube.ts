@@ -60,6 +60,49 @@ export function parsePlaylistId(input: string): string | null {
   return null
 }
 
+export interface ChannelInfo {
+  channelId: string
+  name: string
+  thumbnail: string
+}
+
+function extractChannelId(input: string): string | null {
+  const urlMatch = input.match(/youtube\.com\/channel\/(UC[a-zA-Z0-9_-]{13,})/)
+  if (urlMatch) return urlMatch[1]
+  const rawMatch = input.match(/^(UC[a-zA-Z0-9_-]{13,})$/)
+  if (rawMatch) return rawMatch[1]
+  return null
+}
+
+export async function resolveChannel(input: string): Promise<ChannelInfo | null> {
+  const direct = extractChannelId(input)
+  if (direct) {
+    const url = `${CORS_INSTANCE}/channels/${direct}`
+    const res = await fetch(url)
+    if (res.ok) {
+      const data = await res.json()
+      return {
+        channelId: direct,
+        name: data.author || data.authorId || 'Unknown',
+        thumbnail: data.authorThumbnails?.[data.authorThumbnails.length - 1]?.url || '',
+      }
+    }
+  }
+
+  const searchQuery = input.replace(/^@/, '').replace(/youtube\.com\/@?/, '')
+  const url = `${CORS_INSTANCE}/search?q=${encodeURIComponent(searchQuery)}&type=channel`
+  const res = await fetch(url)
+  if (!res.ok) return null
+  const data = await res.json()
+  const channel = Array.isArray(data) ? data[0] : null
+  if (!channel?.authorId) return null
+  return {
+    channelId: channel.authorId,
+    name: channel.author || 'Unknown',
+    thumbnail: channel.authorThumbnails?.[channel.authorThumbnails.length - 1]?.url || '',
+  }
+}
+
 export async function fetchPlaylistById(playlistId: string): Promise<Playlist> {
   try {
     return await fetchPlaylistInvidious(playlistId)
