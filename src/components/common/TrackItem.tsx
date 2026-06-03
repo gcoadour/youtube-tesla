@@ -12,7 +12,7 @@ export default function TrackItem({ track, index, isActive, onPlay }: Props) {
   return (
     <div
       className={`track-item ${isActive ? 'active' : ''}`}
-      onDoubleClick={onPlay}
+      onClick={onPlay}
     >
       <span className="col-num">{index}</span>
       <div className="col-title">

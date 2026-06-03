@@ -30,7 +30,7 @@ export default function SearchResults({ results, loading, error }: Props) {
         <div
           key={r.videoId}
           className="track-item"
-          onDoubleClick={() => {
+          onClick={() => {
             setQueue(tracks, results.indexOf(r))
             togglePlay()
           }}
