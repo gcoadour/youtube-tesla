@@ -1,13 +1,5 @@
-const HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-  Accept: 'application/json',
-}
-
 const INSTANCES = [
   'https://inv.thepixora.com/api/v1',
-  'https://invidious.f5.si/api/v1',
-  'https://invidious.nerdvpn.de/api/v1',
-  'https://yt.chocolatemoo53.com/api/v1',
 ]
 
 interface AudioFormat {
@@ -32,12 +24,11 @@ export async function getAudioStreamUrl(videoId: string): Promise<string> {
 
       const res = await fetch(`${baseUrl}/videos/${encodeURIComponent(videoId)}`, {
         signal: controller.signal,
-        headers: HEADERS,
       })
       clearTimeout(timeout)
 
       if (!res.ok) {
-        if (res.status === 404 || res.status === 403 || res.status === 401) continue
+        if (res.status === 404) continue
         throw new Error(`HTTP ${res.status}`)
       }
 

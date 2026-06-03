@@ -1,10 +1,5 @@
 import type { YouTubeSearchResult, Playlist, Track } from '../types'
 
-const HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-  Accept: 'application/json',
-}
-
 const CORS_INSTANCE = 'https://inv.thepixora.com/api/v1'
 const RSS_FEED = 'https://www.youtube.com/feeds/videos.xml'
 
@@ -38,7 +33,7 @@ function isMusicContent(item: any): boolean {
 
 export async function searchTracks(query: string): Promise<YouTubeSearchResult[]> {
   const url = `${CORS_INSTANCE}/search?q=${encodeURIComponent(query)}&type=video`
-  const res = await fetch(url, { headers: HEADERS })
+  const res = await fetch(url)
   if (!res.ok) throw new Error(`Search error: ${res.status}`)
   const data = await res.json()
   return (data || [])
@@ -75,7 +70,7 @@ export async function fetchPlaylistById(playlistId: string): Promise<Playlist> {
 
 async function fetchPlaylistInvidious(playlistId: string): Promise<Playlist> {
   const url = `${CORS_INSTANCE}/playlists/${playlistId}`
-  const res = await fetch(url, { headers: HEADERS })
+  const res = await fetch(url)
   if (!res.ok) throw new Error(`Playlist error: ${res.status}`)
   const data = await res.json()
 
