@@ -6,7 +6,7 @@ export default function SettingsPage() {
       <div className="settings-section">
         <h3>About</h3>
         <p className="settings-desc">
-          Spotify Tesla Clone — a web-based music player that uses YouTube as its source.
+          YouTube Music Tesla — a web-based music player that uses YouTube as its source.
         </p>
         <p className="settings-desc">
           Search is powered by a public Invidious API instance. Playlist import uses YouTube RSS feeds.

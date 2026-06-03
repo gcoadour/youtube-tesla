@@ -12,7 +12,7 @@ export default function Sidebar({ onClose }: Props) {
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
-        <div className="sidebar-logo">Spotify</div>
+        <div className="sidebar-logo">YouTube Music Tesla</div>
         <button className="sidebar-close" onClick={onClose} aria-label="Close menu">
           <CloseIcon size={24} />
         </button>
