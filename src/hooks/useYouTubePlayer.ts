@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { usePlayerStore } from '../store/playerStore'
 import { getSponsorSegments, getCurrentSegment } from '../services/sponsorblock'
-import { getAudioStreamUrl } from '../services/innertube'
+import { getAudioStreamUrl } from '../services/invidiousPlayer'
 
 export function useYouTubePlayer() {
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -19,6 +19,9 @@ export function useYouTubePlayer() {
   } = usePlayerStore()
 
   useEffect(() => {
+    delete (window as any).YT
+    delete (window as any).onYouTubeIframeAPIReady
+
     const audio = new Audio()
     audio.preload = 'auto'
     document.body.appendChild(audio)

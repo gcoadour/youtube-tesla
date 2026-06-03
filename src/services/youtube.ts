@@ -1,6 +1,11 @@
 import type { YouTubeSearchResult, Playlist, Track } from '../types'
-import { searchVideos, getPlaylistVideos } from './innertube'
 
+const HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+  Accept: 'application/json',
+}
+
+const CORS_INSTANCE = 'https://inv.thepixora.com/api/v1'
 const RSS_FEED = 'https://www.youtube.com/feeds/videos.xml'
 
 const NON_MUSIC_KEYWORDS = [
@@ -17,8 +22,8 @@ const NON_MUSIC_KEYWORDS = [
 
 function isMusicContent(item: any): boolean {
   const title = (item.title || '').toLowerCase()
-  const author = (item.artist || '').toLowerCase()
-  const mins = (item.duration || 0) / 60
+  const author = (item.author || '').toLowerCase()
+  const mins = (item.lengthSeconds || 0) / 60
 
   if (mins < 0.5 || mins > 20) return false
 
@@ -32,15 +37,18 @@ function isMusicContent(item: any): boolean {
 }
 
 export async function searchTracks(query: string): Promise<YouTubeSearchResult[]> {
-  const videos = await searchVideos(query)
-  return videos
+  const url = `${CORS_INSTANCE}/search?q=${encodeURIComponent(query)}&type=video`
+  const res = await fetch(url, { headers: HEADERS })
+  if (!res.ok) throw new Error(`Search error: ${res.status}`)
+  const data = await res.json()
+  return (data || [])
     .filter(isMusicContent)
-    .map((v) => ({
-      videoId: v.videoId,
-      title: v.title,
-      artist: v.artist,
-      thumbnail: v.thumbnail,
-      duration: formatDuration(v.duration),
+    .map((item: any) => ({
+      videoId: item.videoId,
+      title: item.title,
+      artist: item.author,
+      thumbnail: `https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg`,
+      duration: item.lengthSeconds ? formatDuration(item.lengthSeconds) : '',
     }))
 }
 
@@ -59,29 +67,32 @@ export function parsePlaylistId(input: string): string | null {
 
 export async function fetchPlaylistById(playlistId: string): Promise<Playlist> {
   try {
-    return await fetchPlaylistInnertube(playlistId)
+    return await fetchPlaylistInvidious(playlistId)
   } catch {
     return await fetchPlaylistRss(playlistId)
   }
 }
 
-async function fetchPlaylistInnertube(playlistId: string): Promise<Playlist> {
-  const videos = await getPlaylistVideos(playlistId)
+async function fetchPlaylistInvidious(playlistId: string): Promise<Playlist> {
+  const url = `${CORS_INSTANCE}/playlists/${playlistId}`
+  const res = await fetch(url, { headers: HEADERS })
+  if (!res.ok) throw new Error(`Playlist error: ${res.status}`)
+  const data = await res.json()
 
-  const tracks: Track[] = videos.map((v) => ({
+  const tracks: Track[] = (data.videos || []).map((v: any) => ({
     id: v.videoId,
     videoId: v.videoId,
     title: v.title,
-    artist: v.artist,
-    thumbnail: v.thumbnail,
-    duration: v.duration,
+    artist: v.author,
+    thumbnail: `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
+    duration: v.lengthSeconds || 0,
   }))
 
   return {
     id: playlistId,
-    title: 'Playlist',
-    description: '',
-    thumbnail: tracks[0]?.thumbnail || '',
+    title: data.title || 'Untitled Playlist',
+    description: data.description || '',
+    thumbnail: data.thumbnailUrl || tracks[0]?.thumbnail || '',
     tracks,
     source: 'youtube',
   }
