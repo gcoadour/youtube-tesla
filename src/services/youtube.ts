@@ -113,7 +113,7 @@ export async function fetchChannelPlaylists(channelId: string): Promise<Playlist
     const res = await fetch(url)
     if (!res.ok) throw new Error(`Channel playlists error: ${res.status}`)
     const data = await res.json()
-    const items = data.playlists || data || []
+    const items = Array.isArray(data.playlists) ? data.playlists : []
 
     for (const item of items) {
       if (item.playlistId?.startsWith('LL')) continue
