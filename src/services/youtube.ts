@@ -83,7 +83,7 @@ export async function resolveChannel(input: string): Promise<ChannelInfo | null>
       const data = await res.json()
       return {
         channelId: direct,
-        name: data.author || data.authorId || 'Unknown',
+        name: data.author || 'Unknown',
         thumbnail: data.authorThumbnails?.[data.authorThumbnails.length - 1]?.url || '',
       }
     }
