@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { usePlayerStore } from '../store/playerStore'
 import PlaylistGrid from '../components/Playlist/PlaylistGrid'
-import { fetchPlaylistById, parsePlaylistId } from '../services/youtube'
+import { fetchPlaylistById, parsePlaylistId, resolveChannel, fetchChannelPlaylists } from '../services/youtube'
 
 export default function Library() {
   const playlists = usePlayerStore((s) => s.playlists)
@@ -9,6 +9,10 @@ export default function Library() {
   const [url, setUrl] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [channelInput, setChannelInput] = useState('')
+  const [channelLoading, setChannelLoading] = useState(false)
+  const [channelError, setChannelError] = useState('')
+  const [channelSuccess, setChannelSuccess] = useState('')
 
   const handleImport = async () => {
     setError('')
@@ -26,6 +30,39 @@ export default function Library() {
       setError('Failed to import playlist')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleChannelImport = async () => {
+    setChannelError('')
+    setChannelSuccess('')
+    if (!channelInput.trim()) return
+    setChannelLoading(true)
+    try {
+      const channel = await resolveChannel(channelInput.trim())
+      if (!channel) {
+        setChannelError('Could not find a YouTube channel matching that input')
+        return
+      }
+      const channelPlaylists = await fetchChannelPlaylists(channel.channelId)
+      if (channelPlaylists.length === 0) {
+        setChannelError('No public playlists found for this channel')
+        return
+      }
+      const existingIds = new Set(playlists.map((p) => p.id))
+      let added = 0
+      for (const pl of channelPlaylists) {
+        if (!existingIds.has(pl.id)) {
+          addPlaylist(pl)
+          added++
+        }
+      }
+      setChannelSuccess(`${added} playlists imported from ${channel.name}${added < channelPlaylists.length ? ` (${channelPlaylists.length - added} already in library)` : ''}`)
+      setChannelInput('')
+    } catch {
+      setChannelError('Failed to fetch channel. Try again later.')
+    } finally {
+      setChannelLoading(false)
     }
   }
 
@@ -53,6 +90,29 @@ export default function Library() {
           {loading ? 'Importing...' : 'Import'}
         </button>
         {error && <p className="error-text">{error}</p>}
+      </div>
+
+      <hr className="library-divider" />
+
+      <div className="playlist-import">
+        <input
+          type="text"
+          placeholder="Paste YouTube channel handle, URL, or name..."
+          value={channelInput}
+          onChange={(e) => setChannelInput(e.target.value)}
+          className="search-input"
+          onKeyDown={(e) => e.key === 'Enter' && handleChannelImport()}
+        />
+        <button
+          className="btn-primary"
+          onClick={handleChannelImport}
+          disabled={channelLoading || !channelInput.trim()}
+          style={{ marginLeft: 8 }}
+        >
+          {channelLoading ? 'Fetching...' : 'Import Channel'}
+        </button>
+        {channelError && <p className="error-text">{channelError}</p>}
+        {channelSuccess && <p className="success-text">{channelSuccess}</p>}
       </div>
 
       <PlaylistGrid playlists={playlists} />
