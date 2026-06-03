@@ -19,6 +19,9 @@ export function useYouTubePlayer() {
   } = usePlayerStore()
 
   useEffect(() => {
+    delete (window as any).YT
+    delete (window as any).onYouTubeIframeAPIReady
+
     const audio = new Audio()
     audio.preload = 'auto'
     document.body.appendChild(audio)
@@ -125,7 +128,7 @@ export function useYouTubePlayer() {
     if (!audio) return
 
     const interval = setInterval(() => {
-      if (audio.paused && !audio.seeking) return
+      if (audio.paused || audio.seeking) return
       setProgress(audio.currentTime)
 
       const seg = getCurrentSegment(sponsorBlockSegments, audio.currentTime)
