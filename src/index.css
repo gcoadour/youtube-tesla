@@ -1056,7 +1056,20 @@ input { border: none; outline: none; background: none; color: inherit; }
   }
 
   .progress-bar-container {
-    display: none;
+    gap: 6px;
+  }
+
+  .progress-time {
+    font-size: 11px;
+    min-width: 36px;
+  }
+
+  .progress-bar {
+    height: 4px;
+  }
+
+  .progress-bar:hover {
+    height: 6px;
   }
 
   .npb-right {

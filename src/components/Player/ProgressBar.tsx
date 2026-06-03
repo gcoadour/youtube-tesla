@@ -9,15 +9,27 @@ export default function ProgressBar() {
 
   const seekTo = usePlayerStore((s) => s.seekTo)
 
-  const handleClick = useCallback(
-    (e: React.MouseEvent) => {
+  const seek = useCallback(
+    (clientX: number) => {
       if (!barRef.current || !duration) return
       const rect = barRef.current.getBoundingClientRect()
-      const ratio = (e.clientX - rect.left) / rect.width
-      const time = ratio * duration
-      seekTo(time)
+      const ratio = (clientX - rect.left) / rect.width
+      seekTo(Math.max(0, Math.min(1, ratio)) * duration)
     },
     [duration, seekTo],
+  )
+
+  const handleClick = useCallback(
+    (e: React.MouseEvent) => seek(e.clientX),
+    [seek],
+  )
+
+  const handleTouch = useCallback(
+    (e: React.TouchEvent) => {
+      e.preventDefault()
+      seek(e.touches[0].clientX)
+    },
+    [seek],
   )
 
   const percent = duration ? (progress / duration) * 100 : 0
@@ -25,7 +37,7 @@ export default function ProgressBar() {
   return (
     <div className="progress-bar-container">
       <span className="progress-time">{formatDuration(progress)}</span>
-      <div className="progress-bar" ref={barRef} onClick={handleClick}>
+      <div className="progress-bar" ref={barRef} onClick={handleClick} onTouchStart={handleTouch}>
         <div className="progress-fill" style={{ width: `${percent}%` }} />
       </div>
       <span className="progress-time">{formatDuration(duration)}</span>

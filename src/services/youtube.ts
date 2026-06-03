@@ -15,10 +15,10 @@ const NON_MUSIC_KEYWORDS = [
   'sport', 'match', 'highlight',
 ]
 
-function isMusicContent(item: any): boolean {
+function isMusicContent(item: { title?: string; author?: string; artist?: string; lengthSeconds?: number; duration?: number }): boolean {
   const title = (item.title || '').toLowerCase()
-  const author = (item.author || '').toLowerCase()
-  const mins = (item.lengthSeconds || 0) / 60
+  const author = (item.author || item.artist || '').toLowerCase()
+  const mins = ((item.lengthSeconds ?? item.duration ?? 0)) / 60
 
   if (mins < 0.5 || mins > 20) return false
 
@@ -74,14 +74,16 @@ async function fetchPlaylistInvidious(playlistId: string): Promise<Playlist> {
   if (!res.ok) throw new Error(`Playlist error: ${res.status}`)
   const data = await res.json()
 
-  const tracks: Track[] = (data.videos || []).map((v: any) => ({
-    id: v.videoId,
-    videoId: v.videoId,
-    title: v.title,
-    artist: v.author,
-    thumbnail: `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
-    duration: v.lengthSeconds || 0,
-  }))
+  const tracks: Track[] = (data.videos || [])
+    .filter(isMusicContent)
+    .map((v: any) => ({
+      id: v.videoId,
+      videoId: v.videoId,
+      title: v.title,
+      artist: v.author,
+      thumbnail: `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
+      duration: v.lengthSeconds || 0,
+    }))
 
   return {
     id: playlistId,
@@ -105,26 +107,28 @@ function parseRssPlaylist(xml: string, playlistId: string): Playlist {
   const title = extractXmlTag(xml, 'title') || 'Untitled Playlist'
   const entries = xml.split('<entry>').slice(1)
 
-  const tracks: Track[] = entries.map((entry) => {
-    const videoId = extractXmlTag(entry, 'yt:videoId') || ''
-    const trackTitle = extractXmlTag(entry, 'title') || 'Unknown'
-    const author = extractXmlTag(entry, 'name') || 'Unknown Artist'
-    const thumbnailUrl = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`
-    const mediaGroup = entry.match(/<media:content[^>]*>/)
-    let duration = 0
-    if (mediaGroup) {
-      const durMatch = mediaGroup[0].match(/duration="(\d+)"/)
-      if (durMatch) duration = parseInt(durMatch[1])
-    }
-    return {
-      id: videoId,
-      videoId,
-      title: trackTitle,
-      artist: author,
-      thumbnail: thumbnailUrl,
-      duration,
-    }
-  })
+  const tracks: Track[] = entries
+    .map((entry) => {
+      const videoId = extractXmlTag(entry, 'yt:videoId') || ''
+      const trackTitle = extractXmlTag(entry, 'title') || 'Unknown'
+      const author = extractXmlTag(entry, 'name') || 'Unknown Artist'
+      const thumbnailUrl = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`
+      const mediaGroup = entry.match(/<media:content[^>]*>/)
+      let duration = 0
+      if (mediaGroup) {
+        const durMatch = mediaGroup[0].match(/duration="(\d+)"/)
+        if (durMatch) duration = parseInt(durMatch[1])
+      }
+      return {
+        id: videoId,
+        videoId,
+        title: trackTitle,
+        artist: author,
+        thumbnail: thumbnailUrl,
+        duration,
+      }
+    })
+    .filter(isMusicContent)
 
   return {
     id: playlistId,
