@@ -19,7 +19,6 @@ export default function Layout() {
       <main className="main-content" onClick={() => setSidebarOpen(false)}>
         <Outlet />
       </main>
-      <div id="youtube-player" style={{ display: 'none' }} />
       <NowPlayingBar />
     </div>
   )

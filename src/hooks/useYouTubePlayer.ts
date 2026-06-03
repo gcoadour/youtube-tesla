@@ -1,28 +1,10 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef } from 'react'
 import { usePlayerStore } from '../store/playerStore'
 import { getSponsorSegments, getCurrentSegment } from '../services/sponsorblock'
-
-declare global {
-  interface Window {
-    YT: any
-    onYouTubeIframeAPIReady: (() => void) | undefined
-  }
-}
-
-let apiLoaded = false
-
-function loadYouTubeAPI() {
-  if (apiLoaded) return
-  const tag = document.createElement('script')
-  tag.src = 'https://www.youtube.com/iframe_api'
-  const firstScript = document.getElementsByTagName('script')[0]
-  firstScript.parentNode?.insertBefore(tag, firstScript)
-  apiLoaded = true
-}
+import { getAudioStreamUrl } from '../services/invidiousPlayer'
 
 export function useYouTubePlayer() {
-  const playerRef = useRef<any>(null)
-  const playerReadyRef = useRef(false)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
 
   const {
     currentTrack,
@@ -37,103 +19,134 @@ export function useYouTubePlayer() {
   } = usePlayerStore()
 
   useEffect(() => {
-    loadYouTubeAPI()
+    const audio = new Audio()
+    audio.preload = 'auto'
+    document.body.appendChild(audio)
+    audioRef.current = audio
+
+    return () => {
+      audio.pause()
+      audio.src = ''
+      audio.load()
+      audio.remove()
+      audioRef.current = null
+    }
   }, [])
 
-  const initPlayer = useCallback(() => {
-    if (playerReadyRef.current || !window.YT?.Player) return
-    playerRef.current = new window.YT.Player('youtube-player', {
-      height: '0',
-      width: '0',
-      playerVars: {
-        autoplay: 0,
-        controls: 0,
-        disablekb: 1,
-        fs: 0,
-        modestbranding: 1,
-        playsinline: 1,
-      },
-      events: {
-        onReady: () => {
-          playerReadyRef.current = true
-          playerRef.current.setVolume(volume * 100)
-          usePlayerStore.getState().registerPlayerSeeker((time: number) => {
-            if (playerRef.current) {
-              playerRef.current.seekTo(time, true)
-            }
-          })
-        },
-        onStateChange: (event: any) => {
-          if (event.data === window.YT.PlayerState.PLAYING) {
-            usePlayerStore.getState().play()
-          }
-          if (event.data === window.YT.PlayerState.ENDED) {
-            next()
-          }
-        },
-      },
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio) return
+
+    usePlayerStore.getState().registerPlayerSeeker((time: number) => {
+      audio.currentTime = time
     })
-  }, [volume, next])
+  }, [])
 
   useEffect(() => {
-    window.onYouTubeIframeAPIReady = () => {
-      initPlayer()
-    }
-    if (window.YT?.Player) {
-      initPlayer()
-    }
-  }, [initPlayer])
+    const audio = audioRef.current
+    if (!audio || !currentTrack) return
 
-  useEffect(() => {
-    if (!currentTrack) return
+    let active = true
 
-    const loadVideo = () => {
-      if (!playerRef.current || !playerReadyRef.current) return
-      playerRef.current.loadVideoById(currentTrack.videoId, 0)
-      getSponsorSegments(currentTrack.videoId).then(setSponsorBlockSegments)
-    }
+    const load = async () => {
+      try {
+        const streamUrl = await getAudioStreamUrl(currentTrack.videoId)
+        if (!active) return
 
-    if (playerReadyRef.current) {
-      loadVideo()
-    } else {
-      const check = setInterval(() => {
-        if (playerReadyRef.current) {
-          loadVideo()
-          clearInterval(check)
+        audio.src = streamUrl
+
+        await new Promise<void>((resolve, reject) => {
+          const onMeta = () => {
+            cleanup()
+            resolve()
+          }
+          const onErr = () => {
+            cleanup()
+            reject(new Error('audio load error'))
+          }
+          const cleanup = () => {
+            audio.removeEventListener('loadedmetadata', onMeta)
+            audio.removeEventListener('error', onErr)
+          }
+          audio.addEventListener('loadedmetadata', onMeta)
+          audio.addEventListener('error', onErr, { once: true })
+        })
+
+        if (!active) return
+
+        setDuration(audio.duration || 0)
+        setProgress(0)
+        setSponsorBlockSegments([])
+
+        getSponsorSegments(currentTrack.videoId).then(segments => {
+          if (active) setSponsorBlockSegments(segments)
+        })
+
+        if (usePlayerStore.getState().isPlaying) {
+          audio.play().catch(() => usePlayerStore.getState().pause())
         }
-      }, 100)
-      return () => clearInterval(check)
+      } catch (err) {
+        if (active) {
+          console.error('Failed to load audio stream:', err)
+        }
+      }
     }
-  }, [currentTrack, setSponsorBlockSegments])
+
+    load()
+
+    return () => {
+      active = false
+    }
+  }, [currentTrack, setDuration, setProgress, setSponsorBlockSegments])
 
   useEffect(() => {
-    if (!playerRef.current || !playerReadyRef.current) return
+    const audio = audioRef.current
+    if (!audio || !audio.src) return
+
     if (isPlaying) {
-      playerRef.current.playVideo()
+      if (audio.paused) {
+        audio.play().catch(() => usePlayerStore.getState().pause())
+      }
     } else {
-      playerRef.current.pauseVideo()
+      if (!audio.paused) {
+        audio.pause()
+      }
     }
   }, [isPlaying])
 
   useEffect(() => {
-    if (!playerRef.current || !playerReadyRef.current) return
-    playerRef.current.setVolume(isMuted ? 0 : volume * 100)
+    const audio = audioRef.current
+    if (!audio) return
+    audio.volume = isMuted ? 0 : volume
   }, [volume, isMuted])
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      if (!playerRef.current || !playerReadyRef.current) return
-      const currentTime = playerRef.current.getCurrentTime()
-      const duration = playerRef.current.getDuration()
-      setProgress(currentTime)
-      setDuration(duration)
+    const audio = audioRef.current
+    if (!audio) return
 
-      const seg = getCurrentSegment(sponsorBlockSegments, currentTime)
+    const interval = setInterval(() => {
+      if (audio.paused && !audio.seeking) return
+      setProgress(audio.currentTime)
+
+      const seg = getCurrentSegment(sponsorBlockSegments, audio.currentTime)
       if (seg) {
-        playerRef.current.seekTo(seg.segment[1], true)
+        audio.currentTime = seg.segment[1]
       }
     }, 500)
-    return () => clearInterval(interval)
-  }, [sponsorBlockSegments, setProgress, setDuration])
 
+    return () => clearInterval(interval)
+  }, [sponsorBlockSegments, setProgress])
+
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio) return
+
+    const handleEnded = () => {
+      setProgress(audio.duration)
+      next()
+    }
+
+    audio.addEventListener('ended', handleEnded)
+    return () => audio.removeEventListener('ended', handleEnded)
+  }, [next, setProgress])
 }
