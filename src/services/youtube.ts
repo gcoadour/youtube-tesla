@@ -45,6 +45,7 @@ export async function searchTracks(query: string): Promise<YouTubeSearchResult[]
   const res = await fetch(url)
   if (!res.ok) throw new Error(`Search error: ${res.status}`)
   const data = await res.json()
+  if (data?.error) throw new Error(data.error)
   return (data || [])
     .filter(isMusicContent)
     .map((item: any) => ({
@@ -126,6 +127,7 @@ export async function fetchChannelPlaylists(channelId: string): Promise<Playlist
         const res = await fetch(url)
         if (!res.ok) throw new Error(`Channel playlists error: ${res.status}`)
         const data = await res.json()
+        if (data.error) throw new Error(data.error)
         const items: any[] = Array.isArray(data) ? data : (Array.isArray(data.playlists) ? data.playlists : [])
         for (const item of items) {
           const pid = item.playlistId || item.id
@@ -145,26 +147,23 @@ export async function fetchChannelPlaylists(channelId: string): Promise<Playlist
 
   if (!found) throw new Error(`Failed to fetch playlists for channel ${channelId}`)
 
-  // Then fetch each playlist's full data (tracks + thumbnail)
-  const playlists: Playlist[] = []
-  for (const entry of ids) {
-    try {
-      const full = await fetchPlaylistById(entry.id)
-      playlists.push(full)
-    } catch {
-      // If a single playlist fails, add it as-is (empty tracks)
-      playlists.push({
-        id: entry.id,
-        title: entry.title,
-        description: '',
-        thumbnail: '',
-        tracks: [],
-        source: 'youtube',
-      })
-    }
-  }
+  // Then fetch each playlist's full data in parallel
+  const results = await Promise.allSettled(
+    ids.map((entry) => fetchPlaylistById(entry.id))
+  )
 
-  return playlists
+  return results.map((r, i) =>
+    r.status === 'fulfilled'
+      ? r.value
+      : {
+          id: ids[i].id,
+          title: ids[i].title,
+          description: '',
+          thumbnail: '',
+          tracks: [],
+          source: 'youtube' as const,
+        }
+  )
 }
 
 export async function fetchPlaylistById(playlistId: string): Promise<Playlist> {
@@ -190,6 +189,7 @@ async function fetchPlaylistFromInstance(baseUrl: string, playlistId: string): P
   const res = await fetch(url)
   if (!res.ok) throw new Error(`Playlist error: ${res.status}`)
   const data = await res.json()
+  if (data.error) throw new Error(`Invidious error: ${data.error}`)
 
   const tracks: Track[] = (data.videos || [])
     .filter(isMusicContent)
