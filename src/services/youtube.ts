@@ -156,39 +156,16 @@ export async function fetchChannelPlaylists(channelId: string): Promise<Playlist
   throw lastError || new Error(`Failed to fetch playlists for channel ${channelId}`)
 }
 
-export async function fetchPlaylistById(playlistId: string): Promise<Playlist> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 10000)
-
-  try {
-    const result = await fetchPlaylistFromInstance(CORS_INSTANCE, playlistId, controller.signal)
-    clearTimeout(timer)
-    return result
-  } catch {
-    clearTimeout(timer)
-  }
-
-  for (const baseUrl of INSTANCES) {
-    if (baseUrl === CORS_INSTANCE) continue
-    try {
-      return await fetchPlaylistFromInstance(baseUrl, playlistId)
-    } catch {
-      // try next instance
-    }
-  }
-
-  try {
-    return await fetchPlaylistRss(playlistId)
-  } catch {
-    // fallback failed too
-  }
-
-  throw new Error(`Failed to load playlist ${playlistId}`)
+function fetchWithTimeout(url: string, timeoutMs: number): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Request timed out')), timeoutMs)
+    fetch(url).then((r) => { clearTimeout(timer); resolve(r) }).catch((e) => { clearTimeout(timer); reject(e) })
+  })
 }
 
-async function fetchPlaylistFromInstance(baseUrl: string, playlistId: string, signal?: AbortSignal): Promise<Playlist> {
+async function fetchPlaylistFromInstance(baseUrl: string, playlistId: string): Promise<Playlist> {
   const url = `${baseUrl}/playlists/${playlistId}`
-  const res = await fetch(url, { signal })
+  const res = await fetchWithTimeout(url, 8000)
   if (!res.ok) throw new Error(`Playlist error: ${res.status}`)
   const data = await res.json()
 
@@ -211,6 +188,24 @@ async function fetchPlaylistFromInstance(baseUrl: string, playlistId: string, si
     tracks,
     source: 'youtube',
   }
+}
+
+export async function fetchPlaylistById(playlistId: string): Promise<Playlist> {
+  for (const baseUrl of INSTANCES) {
+    try {
+      return await fetchPlaylistFromInstance(baseUrl, playlistId)
+    } catch {
+      // try next instance
+    }
+  }
+
+  try {
+    return await fetchPlaylistRss(playlistId)
+  } catch {
+    // fallback failed too
+  }
+
+  throw new Error(`Failed to load playlist ${playlistId}`)
 }
 
 async function fetchPlaylistRss(playlistId: string): Promise<Playlist> {
