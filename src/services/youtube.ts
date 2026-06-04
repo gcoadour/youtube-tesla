@@ -1,6 +1,15 @@
 import type { YouTubeSearchResult, Playlist, Track } from '../types'
 
 const CORS_INSTANCE = 'https://inv.thepixora.com/api/v1'
+
+const INSTANCES = [
+  CORS_INSTANCE,
+  'https://inv.nadeko.net/api/v1',
+  'https://yt.artemislena.eu/api/v1',
+  'https://invidious.private.coffee/api/v1',
+  'https://invidious.nerdvpn.de/api/v1',
+]
+
 const RSS_FEED = 'https://www.youtube.com/feeds/videos.xml'
 
 const NON_MUSIC_KEYWORDS = [
@@ -103,17 +112,29 @@ export async function resolveChannel(input: string): Promise<ChannelInfo | null>
   }
 }
 
-export async function fetchChannelPlaylists(channelId: string): Promise<Playlist[]> {
+async function fetchChannelPlaylistsFromInstance(baseUrl: string, channelId: string): Promise<Playlist[]> {
   const playlists: Playlist[] = []
   let continuation: string | undefined
 
   do {
-    let url = `${CORS_INSTANCE}/channels/${channelId}/playlists?sort=oldest`
+    let url = `${baseUrl}/channels/${channelId}/playlists?sort=oldest`
     if (continuation) url += `&continuation=${encodeURIComponent(continuation)}`
-    const res = await fetch(url)
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 15000)
+
+    let res: Response
+    try {
+      res = await fetch(url, { signal: controller.signal })
+      clearTimeout(timeout)
+    } catch {
+      clearTimeout(timeout)
+      throw new Error('Channel playlists request failed')
+    }
+
     if (!res.ok) throw new Error(`Channel playlists error: ${res.status}`)
     const data = await res.json()
-    const items = Array.isArray(data.playlists) ? data.playlists : []
+
+    const items: any[] = Array.isArray(data) ? data : (Array.isArray(data.playlists) ? data.playlists : [])
 
     for (const item of items) {
       if (item.playlistId?.startsWith('LL')) continue
@@ -133,38 +154,71 @@ export async function fetchChannelPlaylists(channelId: string): Promise<Playlist
   return playlists
 }
 
-export async function fetchPlaylistById(playlistId: string): Promise<Playlist> {
-  try {
-    return await fetchPlaylistInvidious(playlistId)
-  } catch {
-    return await fetchPlaylistRss(playlistId)
+export async function fetchChannelPlaylists(channelId: string): Promise<Playlist[]> {
+  let lastError: Error | null = null
+  for (const baseUrl of INSTANCES) {
+    try {
+      return await fetchChannelPlaylistsFromInstance(baseUrl, channelId)
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err))
+    }
   }
+  throw lastError || new Error(`Failed to fetch playlists for channel ${channelId}`)
 }
 
-async function fetchPlaylistInvidious(playlistId: string): Promise<Playlist> {
-  const url = `${CORS_INSTANCE}/playlists/${playlistId}`
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`Playlist error: ${res.status}`)
-  const data = await res.json()
+export async function fetchPlaylistById(playlistId: string): Promise<Playlist> {
+  let lastError: Error | null = null
 
-  const tracks: Track[] = (data.videos || [])
-    .filter(isMusicContent)
-    .map((v: any) => ({
-      id: v.videoId,
-      videoId: v.videoId,
-      title: v.title,
-      artist: v.author,
-      thumbnail: `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
-      duration: v.lengthSeconds || 0,
-    }))
+  for (const baseUrl of INSTANCES) {
+    try {
+      return await fetchPlaylistFromInstance(baseUrl, playlistId)
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err))
+    }
+  }
 
-  return {
-    id: playlistId,
-    title: data.title || 'Untitled Playlist',
-    description: data.description || '',
-    thumbnail: data.thumbnailUrl || tracks[0]?.thumbnail || '',
-    tracks,
-    source: 'youtube',
+  try {
+    return await fetchPlaylistRss(playlistId)
+  } catch (err) {
+    lastError = err instanceof Error ? err : new Error(String(err))
+  }
+
+  throw lastError || new Error(`Failed to fetch playlist ${playlistId}`)
+}
+
+async function fetchPlaylistFromInstance(baseUrl: string, playlistId: string): Promise<Playlist> {
+  const url = `${baseUrl}/playlists/${playlistId}`
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 15000)
+
+  try {
+    const res = await fetch(url, { signal: controller.signal })
+    clearTimeout(timeout)
+    if (!res.ok) throw new Error(`Playlist error: ${res.status}`)
+    const data = await res.json()
+
+    const tracks: Track[] = (data.videos || [])
+      .filter(isMusicContent)
+      .map((v: any) => ({
+        id: v.videoId,
+        videoId: v.videoId,
+        title: v.title,
+        artist: v.author,
+        thumbnail: `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
+        duration: v.lengthSeconds || 0,
+      }))
+
+    return {
+      id: playlistId,
+      title: data.title || 'Untitled Playlist',
+      description: data.description || '',
+      thumbnail: data.thumbnailUrl || tracks[0]?.thumbnail || '',
+      tracks,
+      source: 'youtube',
+    }
+  } catch (err) {
+    clearTimeout(timeout)
+    throw err
   }
 }
 

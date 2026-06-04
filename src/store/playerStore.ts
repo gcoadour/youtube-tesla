@@ -25,6 +25,7 @@ interface PlayerStore extends PlayerState {
   toggleLikeTrack: (trackId: string) => void
   setPlaylists: (playlists: import('../types').Playlist[]) => void
   addPlaylist: (playlist: import('../types').Playlist) => void
+  updatePlaylistTracks: (id: string, tracks: import('../types').Track[]) => void
 }
 
 let _playerSeeker: ((time: number) => void) | null = null
@@ -134,4 +135,10 @@ export const usePlayerStore = create<PlayerStore>((set, get) => ({
   setPlaylists: (playlists) => set({ playlists }),
   addPlaylist: (playlist) =>
     set((s) => ({ playlists: [...s.playlists, playlist] })),
+  updatePlaylistTracks: (id, tracks) =>
+    set((s) => ({
+      playlists: s.playlists.map((p) =>
+        p.id === id ? { ...p, tracks } : p
+      ),
+    })),
 }))
