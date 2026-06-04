@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { usePlayerStore } from '../store/playerStore'
 import { fetchPlaylistById } from '../services/youtube'
@@ -11,13 +11,16 @@ export default function PlaylistPage() {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const attemptedKey = useRef(0)
+  const [retryKey, setRetryKey] = useState(0)
 
   const storePlaylist = playlists.find((p) => p.id === id)
 
   useEffect(() => {
     if (!storePlaylist || !id) return
-    if (storePlaylist.tracks.length > 0) return
     if (storePlaylist.source !== 'youtube') return
+    if (storePlaylist.tracks.length > 0) return
+    if (attemptedKey.current === retryKey + 1) return
 
     let cancelled = false
     setLoading(true)
@@ -28,15 +31,17 @@ export default function PlaylistPage() {
         if (cancelled) return
         updatePlaylistTracks(id, full.tracks)
         setLoading(false)
+        attemptedKey.current = retryKey + 1
       })
       .catch((err) => {
         if (cancelled) return
         setError(err instanceof Error ? err.message : 'Failed to load playlist')
         setLoading(false)
+        attemptedKey.current = retryKey + 1
       })
 
     return () => { cancelled = true }
-  }, [id, storePlaylist, updatePlaylistTracks])
+  }, [id, storePlaylist, updatePlaylistTracks, retryKey])
 
   const playlist = storePlaylist
     ? { ...storePlaylist, tracks: storePlaylist.tracks }
@@ -87,7 +92,7 @@ export default function PlaylistPage() {
           </div>
           <div className="playlist-error">
             <p>Failed to load tracks: {error}</p>
-            <button onClick={() => window.location.reload()} className="btn-primary">
+            <button onClick={() => setRetryKey(k => k + 1)} className="btn-primary">
               Retry
             </button>
           </div>
