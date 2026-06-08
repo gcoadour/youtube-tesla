@@ -1,6 +1,12 @@
 import { getAudioStreamUrl as getInnerTubeStreamUrl } from './innertube'
 
+function isDev(): boolean {
+  return window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+}
+
 export async function getAudioStreamUrl(videoId: string): Promise<string> {
+  if (isDev()) return `/api/yt-audio/${videoId}`
+
   try {
     return await getInnerTubeStreamUrl(videoId)
   } catch {

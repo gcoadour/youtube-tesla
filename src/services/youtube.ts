@@ -1,4 +1,5 @@
 import type { YouTubeSearchResult, Playlist, Track } from '../types'
+import { searchVideos as searchVideosInnertube, getPlaylistVideos as getPlaylistVideosInnertube, getChannelPlaylists as getChannelPlaylistsInnertube } from './innertube'
 
 const CORS_INSTANCE = 'https://inv.thepixora.com/api/v1'
 
@@ -41,20 +42,35 @@ function isMusicContent(item: { title?: string; author?: string; artist?: string
 }
 
 export async function searchTracks(query: string): Promise<YouTubeSearchResult[]> {
-  const url = `${CORS_INSTANCE}/search?q=${encodeURIComponent(query)}&type=video`
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`Search error: ${res.status}`)
-  const data = await res.json()
-  if (data?.error) throw new Error(data.error)
-  return (data || [])
-    .filter(isMusicContent)
-    .map((item: any) => ({
-      videoId: item.videoId,
-      title: item.title,
-      artist: item.author,
-      thumbnail: `https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg`,
-      duration: item.lengthSeconds ? formatDuration(item.lengthSeconds) : '',
-    }))
+  for (const baseUrl of INSTANCES) {
+    try {
+      const url = `${baseUrl}/search?q=${encodeURIComponent(query)}&type=video`
+      const res = await fetch(url)
+      if (!res.ok) continue
+      const data = await res.json()
+      if (data?.error) continue
+      return (data || [])
+        .filter(isMusicContent)
+        .map((item: any) => ({
+          videoId: item.videoId,
+          title: item.title,
+          artist: item.author,
+          thumbnail: `https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg`,
+          duration: item.lengthSeconds ? formatDuration(item.lengthSeconds) : '',
+        }))
+    } catch {
+      continue
+    }
+  }
+
+  const results = await searchVideosInnertube(query)
+  return results.map((v) => ({
+    videoId: v.videoId,
+    title: v.title,
+    artist: v.artist,
+    thumbnail: v.thumbnail,
+    duration: formatDuration(v.duration),
+  }))
 }
 
 export function parsePlaylistId(input: string): string | null {
@@ -114,7 +130,6 @@ export async function resolveChannel(input: string): Promise<ChannelInfo | null>
 }
 
 export async function fetchChannelPlaylists(channelId: string): Promise<Playlist[]> {
-  // First get the list of playlists from any working instance
   let ids: { id: string; title: string }[] = []
   let found = false
 
@@ -145,9 +160,18 @@ export async function fetchChannelPlaylists(channelId: string): Promise<Playlist
     }
   }
 
-  if (!found) throw new Error(`Failed to fetch playlists for channel ${channelId}`)
+  if (!found) {
+    const channelPlaylists = await getChannelPlaylistsInnertube(channelId)
+    return channelPlaylists.map((pl) => ({
+      id: pl.id,
+      title: pl.title,
+      description: pl.description,
+      thumbnail: pl.thumbnail,
+      tracks: [],
+      source: 'youtube' as const,
+    }))
+  }
 
-  // Then fetch each playlist's full data in parallel
   const results = await Promise.allSettled(
     ids.map((entry) => fetchPlaylistById(entry.id))
   )
@@ -178,10 +202,25 @@ export async function fetchPlaylistById(playlistId: string): Promise<Playlist> {
   try {
     return await fetchPlaylistRss(playlistId)
   } catch {
-    // fallback failed too
+    // RSS fallback failed too
   }
 
-  throw new Error(`Failed to load playlist ${playlistId}`)
+  const tracks = await getPlaylistVideosInnertube(playlistId)
+  return {
+    id: playlistId,
+    title: 'Untitled Playlist',
+    description: '',
+    thumbnail: tracks[0]?.thumbnail || '',
+    tracks: tracks.map((t) => ({
+      id: t.videoId,
+      videoId: t.videoId,
+      title: t.title,
+      artist: t.artist,
+      thumbnail: t.thumbnail,
+      duration: t.duration,
+    })),
+    source: 'youtube',
+  }
 }
 
 async function fetchPlaylistFromInstance(baseUrl: string, playlistId: string): Promise<Playlist> {

@@ -1,9 +1,28 @@
-import { Innertube } from 'youtubei.js'
+import { Innertube, Platform } from 'youtubei.js'
 
 let yt: InstanceType<typeof Innertube> | null = null
 let initPromise: Promise<InstanceType<typeof Innertube>> | null = null
 
+function ensureEval() {
+  try {
+    const currentEval = Platform.shim.eval
+    if (typeof currentEval === 'function' && currentEval.toString().includes('must provide your own')) {
+      Platform.load({
+        ...Platform.shim,
+        eval: function(data: any, _env: any) {
+          const code = data.output.replace(/\b(let|const|var)\s+exportedVars\s*=/g, 'exportedVars =')
+          const fn = new Function('exportedVars', code)
+          return fn({})
+        },
+      })
+    }
+  } catch {
+    // Platform not loaded yet; will be called again
+  }
+}
+
 async function getClient(): Promise<InstanceType<typeof Innertube>> {
+  ensureEval()
   if (yt) return yt
   if (!initPromise) {
     initPromise = Innertube.create({ lang: 'en', location: 'US' })
@@ -12,27 +31,37 @@ async function getClient(): Promise<InstanceType<typeof Innertube>> {
   return yt
 }
 
-export async function getAudioStreamUrl(videoId: string): Promise<string> {
-  const client = await getClient()
-  const rawResponse = await client.actions.execute('/player', {
-    videoId,
-    parse: false,
-    client: 'ANDROID',
-  })
-
-  const formats = rawResponse.data?.streamingData?.formats || []
-  if (formats.length > 0 && formats[0].url) {
-    return formats[0].url
-  }
-
-  const adaptiveFormats = rawResponse.data?.streamingData?.adaptiveFormats || []
-  for (const f of adaptiveFormats) {
-    if (f.mimeType?.startsWith('audio/') && f.url) {
-      return f.url
+async function tryDecipher(formats: any[], player: any): Promise<string | null> {
+  for (const fmt of formats) {
+    if (fmt.url) return fmt.url
+    if (fmt.signature_cipher || fmt.cipher) {
+      try {
+        return await fmt.decipher(player)
+      } catch {
+        continue
+      }
     }
   }
+  return null
+}
 
-  throw new Error('Could not get audio URL from ANDROID client')
+export async function getAudioStreamUrl(videoId: string): Promise<string> {
+  const client = await getClient()
+  const info = await client.getInfo(videoId)
+  const player = client.session.player
+  if (!player) throw new Error('No player available')
+
+  const audioFormats = (info.streaming_data?.adaptive_formats || [])
+    .filter((f: any) => f.mime_type?.startsWith('audio/'))
+
+  const url = await tryDecipher(audioFormats, player)
+  if (url) return url
+
+  const combinedFormats = info.streaming_data?.formats || []
+  const combinedUrl = await tryDecipher(combinedFormats, player)
+  if (combinedUrl) return combinedUrl
+
+  throw new Error('Could not decipher audio URL')
 }
 
 export async function searchVideos(query: string): Promise<{
