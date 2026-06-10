@@ -1,15 +1,8 @@
 import type { YouTubeSearchResult, Playlist, Track } from '../types'
 import { searchVideos as searchVideosInnertube, getPlaylistVideos as getPlaylistVideosInnertube, getChannelPlaylists as getChannelPlaylistsInnertube } from './innertube'
+import { fetchFromInvidious, fetchInstances } from './invidious'
 
-const CORS_INSTANCE = 'https://inv.thepixora.com/api/v1'
-
-const INSTANCES = [
-  CORS_INSTANCE,
-  'https://inv.nadeko.net/api/v1',
-  'https://yt.artemislena.eu/api/v1',
-  'https://invidious.private.coffee/api/v1',
-  'https://invidious.nerdvpn.de/api/v1',
-]
+fetchInstances().catch(() => {})
 
 const RSS_FEED = 'https://www.youtube.com/feeds/videos.xml'
 
@@ -42,25 +35,22 @@ function isMusicContent(item: { title?: string; author?: string; artist?: string
 }
 
 export async function searchTracks(query: string): Promise<YouTubeSearchResult[]> {
-  for (const baseUrl of INSTANCES) {
-    try {
-      const url = `${baseUrl}/search?q=${encodeURIComponent(query)}&type=video`
-      const res = await fetch(url)
-      if (!res.ok) continue
-      const data = await res.json()
-      if (data?.error) continue
-      return (data || [])
-        .filter(isMusicContent)
-        .map((item: any) => ({
-          videoId: item.videoId,
-          title: item.title,
-          artist: item.author,
-          thumbnail: `https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg`,
-          duration: item.lengthSeconds ? formatDuration(item.lengthSeconds) : '',
-        }))
-    } catch {
-      continue
-    }
+  try {
+    const { data } = await fetchFromInvidious(
+      `/search?q=${encodeURIComponent(query)}&type=video`
+    )
+    const results = (data || [])
+      .filter(isMusicContent)
+      .map((item: any) => ({
+        videoId: item.videoId,
+        title: item.title,
+        artist: item.author,
+        thumbnail: `https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg`,
+        duration: item.lengthSeconds ? formatDuration(item.lengthSeconds) : '',
+      }))
+    if (results.length > 0) return results
+  } catch {
+    // Invidious failed, try InnerTube
   }
 
   const results = await searchVideosInnertube(query)
@@ -103,64 +93,58 @@ function extractChannelId(input: string): string | null {
 export async function resolveChannel(input: string): Promise<ChannelInfo | null> {
   const direct = extractChannelId(input)
   if (direct) {
-    const url = `${CORS_INSTANCE}/channels/${direct}`
-    const res = await fetch(url)
-    if (res.ok) {
-      const data = await res.json()
+    try {
+      const { data } = await fetchFromInvidious(`/channels/${direct}`)
       return {
         channelId: direct,
         name: data.author || 'Unknown',
         thumbnail: data.authorThumbnails?.[data.authorThumbnails.length - 1]?.url || '',
       }
+    } catch {
+      // continue to search
     }
   }
 
   const searchQuery = input.replace(/^@/, '').replace(/youtube\.com\/@?/, '')
-  const url = `${CORS_INSTANCE}/search?q=${encodeURIComponent(searchQuery)}&type=channel`
-  const res = await fetch(url)
-  if (!res.ok) return null
-  const data = await res.json()
-  const channel = Array.isArray(data) ? data[0] : null
-  if (!channel?.authorId) return null
-  return {
-    channelId: channel.authorId,
-    name: channel.author || 'Unknown',
-    thumbnail: channel.authorThumbnails?.[channel.authorThumbnails.length - 1]?.url || '',
+  try {
+    const { data } = await fetchFromInvidious(
+      `/search?q=${encodeURIComponent(searchQuery)}&type=channel`
+    )
+    const channel = Array.isArray(data) ? data[0] : null
+    if (!channel?.authorId) return null
+    return {
+      channelId: channel.authorId,
+      name: channel.author || 'Unknown',
+      thumbnail: channel.authorThumbnails?.[channel.authorThumbnails.length - 1]?.url || '',
+    }
+  } catch {
+    return null
   }
 }
 
 export async function fetchChannelPlaylists(channelId: string): Promise<Playlist[]> {
   let ids: { id: string; title: string }[] = []
-  let found = false
 
-  for (const baseUrl of INSTANCES) {
-    try {
-      let continuation: string | undefined
-      do {
-        let url = `${baseUrl}/channels/${channelId}/playlists?sort=oldest`
-        if (continuation) url += `&continuation=${encodeURIComponent(continuation)}`
-        const res = await fetch(url)
-        if (!res.ok) throw new Error(`Channel playlists error: ${res.status}`)
-        const data = await res.json()
-        if (data.error) throw new Error(data.error)
-        const items: any[] = Array.isArray(data) ? data : (Array.isArray(data.playlists) ? data.playlists : [])
-        for (const item of items) {
-          const pid = item.playlistId || item.id
-          if (pid && !pid.startsWith('LL')) {
-            ids.push({ id: pid, title: item.title || 'Untitled' })
-          }
+  try {
+    let continuation: string | undefined
+    do {
+      let path = `/channels/${channelId}/playlists?sort=oldest`
+      if (continuation) path += `&continuation=${encodeURIComponent(continuation)}`
+      const { data } = await fetchFromInvidious(path)
+      const items: any[] = Array.isArray(data) ? data : (Array.isArray(data.playlists) ? data.playlists : [])
+      for (const item of items) {
+        const pid = item.playlistId || item.id
+        if (pid && !pid.startsWith('LL')) {
+          ids.push({ id: pid, title: item.title || 'Untitled' })
         }
-        continuation = data.continuation
-      } while (continuation)
-      found = true
-      break
-    } catch {
-      ids = []
-      continue
-    }
+      }
+      continuation = data.continuation
+    } while (continuation)
+  } catch {
+    // fall through to InnerTube
   }
 
-  if (!found) {
+  if (ids.length === 0) {
     const channelPlaylists = await getChannelPlaylistsInnertube(channelId)
     return channelPlaylists.map((pl) => ({
       id: pl.id,
@@ -191,12 +175,10 @@ export async function fetchChannelPlaylists(channelId: string): Promise<Playlist
 }
 
 export async function fetchPlaylistById(playlistId: string): Promise<Playlist> {
-  for (const baseUrl of INSTANCES) {
-    try {
-      return await fetchPlaylistFromInstance(baseUrl, playlistId)
-    } catch {
-      // try next instance
-    }
+  try {
+    return await fetchPlaylistFromInvidious(playlistId)
+  } catch {
+    // try RSS fallback
   }
 
   try {
@@ -223,12 +205,8 @@ export async function fetchPlaylistById(playlistId: string): Promise<Playlist> {
   }
 }
 
-async function fetchPlaylistFromInstance(baseUrl: string, playlistId: string): Promise<Playlist> {
-  const url = `${baseUrl}/playlists/${playlistId}`
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`Playlist error: ${res.status}`)
-  const data = await res.json()
-  if (data.error) throw new Error(`Invidious error: ${data.error}`)
+async function fetchPlaylistFromInvidious(playlistId: string): Promise<Playlist> {
+  const { data } = await fetchFromInvidious(`/playlists/${playlistId}`)
 
   const tracks: Track[] = (data.videos || [])
     .filter(isMusicContent)
