@@ -52,7 +52,7 @@ export async function fetchInstances(): Promise<void> {
     const data: [string, any][] = await res.json()
     const parsed: InvidiousInstance[] = []
 
-    for (const [name, info] of data) {
+    for (const [, info] of data) {
       if (info.type !== 'https') continue
       if (info.cors !== true) continue
       if (!info.uri) continue
