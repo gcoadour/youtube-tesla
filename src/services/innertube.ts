@@ -43,13 +43,13 @@ export async function searchVideos(query: string): Promise<{
   duration: number
 }[]> {
   const client = await getClient()
-  const results = await client.search(query)
-  const videos = results.videos?.slice(0, 20) || []
+  const results = await client.music.search(query, { type: 'song' })
+  const songs = results.songs?.contents?.slice(0, 20) || []
 
-  return videos.map((v: any) => ({
+  return songs.map((v: any) => ({
     videoId: v.id || '',
-    title: v.title?.toString() || 'Unknown',
-    artist: v.author?.name?.toString() || 'Unknown Artist',
+    title: v.title || 'Unknown',
+    artist: v.authors?.[0]?.name || 'Unknown Artist',
     thumbnail: v.thumbnails?.[0]?.url || `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`,
     duration: v.duration?.seconds || 0,
   }))

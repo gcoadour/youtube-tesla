@@ -16,6 +16,8 @@ const NON_MUSIC_KEYWORDS = [
   'vlog', 'daily',
   'cooking', 'recipe',
   'sport', 'match', 'highlight',
+  'behind the scenes', 'making of', 'interview',
+  'reaction', 'commentary', 'documentary',
 ]
 
 function isMusicContent(item: { title?: string; author?: string; artist?: string; lengthSeconds?: number; duration?: number }): boolean {
@@ -26,7 +28,7 @@ function isMusicContent(item: { title?: string; author?: string; artist?: string
   if (mins < 0.5 || mins > 20) return false
 
   const isMusicChannel = ['vevo', 'music', 'records', 'official', 'topic'].some(k => author.includes(k))
-  const hasMusicTitle = ['official video', 'official audio', 'official music', 'lyrics', 'lyric video', 'feat.', 'ft.', 'remix'].some(k => title.includes(k))
+  const hasMusicTitle = ['official video', 'official audio', 'official music', 'lyrics', 'lyric video', 'feat.', 'ft.', 'remix', 'clip', 'concert', 'live', 'acoustic', 'cover', 'instrumental', 'karaoke', 'session', 'performance'].some(k => title.includes(k))
 
   if (isMusicChannel || hasMusicTitle) return true
 
@@ -54,13 +56,15 @@ export async function searchTracks(query: string): Promise<YouTubeSearchResult[]
   }
 
   const results = await searchVideosInnertube(query)
-  return results.map((v) => ({
-    videoId: v.videoId,
-    title: v.title,
-    artist: v.artist,
-    thumbnail: v.thumbnail,
-    duration: formatDuration(v.duration),
-  }))
+  return results
+    .filter(isMusicContent)
+    .map((v) => ({
+      videoId: v.videoId,
+      title: v.title,
+      artist: v.artist,
+      thumbnail: v.thumbnail,
+      duration: formatDuration(v.duration),
+    }))
 }
 
 export function parsePlaylistId(input: string): string | null {
