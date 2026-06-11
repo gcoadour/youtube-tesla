@@ -1,5 +1,7 @@
+import { useEffect, useState } from 'react'
 import type { Track } from '../../types'
 import { formatDuration } from '../../services/youtube'
+import { isCached as checkCached } from '../../services/audioCache'
 
 interface Props {
   track: Track
@@ -9,6 +11,12 @@ interface Props {
 }
 
 export default function TrackItem({ track, index, isActive, onPlay }: Props) {
+  const [cached, setCached] = useState(false)
+
+  useEffect(() => {
+    checkCached(track.videoId).then(setCached)
+  }, [track.videoId])
+
   return (
     <div
       className={`track-item ${isActive ? 'active' : ''}`}
@@ -20,7 +28,10 @@ export default function TrackItem({ track, index, isActive, onPlay }: Props) {
         <span>{track.title}</span>
       </div>
       <span className="col-artist">{track.artist}</span>
-      <span className="col-duration">{formatDuration(track.duration)}</span>
+      <span className="col-actions">
+        {cached && <span className="cache-indicator" title="Disponible hors ligne" />}
+        <span className="col-duration">{formatDuration(track.duration)}</span>
+      </span>
     </div>
   )
 }

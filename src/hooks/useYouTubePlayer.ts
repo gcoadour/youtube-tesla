@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react'
 import { usePlayerStore } from '../store/playerStore'
 import { getSponsorSegments, getCurrentSegment } from '../services/sponsorblock'
-import { getAudioStreamUrl } from '../services/invidiousPlayer'
+import { getAudioBlob } from '../services/invidiousPlayer'
+import { getCachedAudio, cacheAudio } from '../services/audioCache'
 
 export function useYouTubePlayer() {
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -50,13 +51,25 @@ export function useYouTubePlayer() {
     if (!audio || !currentTrack) return
 
     let active = true
+    let objectUrl: string | null = null
 
     const load = async () => {
       try {
-        const streamUrl = await getAudioStreamUrl(currentTrack.videoId)
+        const cached = await getCachedAudio(currentTrack.videoId)
         if (!active) return
 
-        audio.src = streamUrl
+        if (cached) {
+          objectUrl = URL.createObjectURL(cached)
+          audio.src = objectUrl
+        } else {
+          const blob = await getAudioBlob(currentTrack.videoId)
+          if (!active) return
+
+          cacheAudio(currentTrack.videoId, blob).catch(() => {})
+
+          objectUrl = URL.createObjectURL(blob)
+          audio.src = objectUrl
+        }
 
         await new Promise<void>((resolve, reject) => {
           const onMeta = () => {
@@ -99,6 +112,9 @@ export function useYouTubePlayer() {
 
     return () => {
       active = false
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl)
+      }
     }
   }, [currentTrack, setDuration, setProgress, setSponsorBlockSegments])
 

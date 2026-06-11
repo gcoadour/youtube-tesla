@@ -19,3 +19,12 @@ export async function getAudioStreamUrl(videoId: string): Promise<string> {
 
   return getAudioUrlFromInvidious(videoId)
 }
+
+export async function getAudioBlob(videoId: string): Promise<Blob> {
+  const streamUrl = await getAudioStreamUrl(videoId)
+  const response = await fetch(streamUrl)
+  if (!response.ok) {
+    throw new Error(`Failed to fetch audio blob: ${response.status} ${response.statusText}`)
+  }
+  return response.blob()
+}

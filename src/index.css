@@ -543,6 +543,21 @@ input { border: none; outline: none; background: none; color: inherit; }
   color: var(--text-subtle);
 }
 
+.col-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cache-indicator {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
 .playlist-tracks-header {
   display: flex;
   align-items: center;
@@ -771,6 +786,78 @@ input { border: none; outline: none; background: none; color: inherit; }
   color: var(--accent);
   font-size: 13px;
   width: 100%;
+}
+
+/* Cache (Settings) */
+.cache-track-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 16px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.cache-track-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: var(--bg-highlight);
+  font-size: 13px;
+}
+
+.cache-track-id {
+  flex: 1;
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cache-track-size {
+  color: var(--text-subtle);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.cache-delete-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  font-size: 16px;
+  transition: all var(--transition);
+  flex-shrink: 0;
+}
+
+.cache-delete-btn:hover {
+  color: #f15e5e;
+  background: rgba(241, 94, 94, 0.1);
+}
+
+.cache-clear-btn {
+  margin-top: 8px;
+}
+
+.cache-confirm-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.cache-confirm-yes {
+  padding: 10px 20px;
+  font-size: 14px;
+  min-height: auto;
 }
 
 /* ==============================
