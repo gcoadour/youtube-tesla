@@ -46,6 +46,34 @@ test.describe('Audio playback', () => {
     expect(paused).toBe(false)
   })
 
+  test('audio is audible (volume > 0, not muted)', async ({ page }) => {
+    await page.goto(SEARCH)
+    await page.locator('.search-input').fill('Rick Astley Never Gonna Give You Up')
+    await expect(page.locator('.track-item').first()).toBeVisible({ timeout: 15_000 })
+
+    await page.locator('.track-item').first().click()
+
+    await page.waitForFunction(() => {
+      const audio = document.querySelector('audio')
+      return audio && !audio.paused && audio.readyState >= 2
+    }, { timeout: 30_000 })
+
+    const state = await page.evaluate(() => {
+      const audio = document.querySelector('audio')
+      return {
+        volume: audio?.volume ?? 0,
+        muted: audio?.muted ?? true,
+        paused: audio?.paused ?? true,
+        readyState: audio?.readyState ?? 0,
+      }
+    })
+
+    expect(state.volume).toBeGreaterThan(0)
+    expect(state.muted).toBe(false)
+    expect(state.paused).toBe(false)
+    expect(state.readyState).toBeGreaterThanOrEqual(2)
+  })
+
   test('audio has valid duration', async ({ page }) => {
     await page.goto(SEARCH)
     await page.locator('.search-input').fill('Rick Astley Never Gonna Give You Up')
