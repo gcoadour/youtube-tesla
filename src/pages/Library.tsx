@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { usePlayerStore } from '../store/playerStore'
 import PlaylistGrid from '../components/Playlist/PlaylistGrid'
 import { fetchPlaylistById, parsePlaylistId, resolveChannel, fetchChannelPlaylists } from '../services/youtube'
 
 export default function Library() {
   const playlists = usePlayerStore((s) => s.playlists)
+  const importedPlaylists = usePlayerStore((s) => s.importedPlaylists)
   const addPlaylist = usePlayerStore((s) => s.addPlaylist)
   const [url, setUrl] = useState('')
   const [loading, setLoading] = useState(false)
@@ -13,6 +14,30 @@ export default function Library() {
   const [channelLoading, setChannelLoading] = useState(false)
   const [channelError, setChannelError] = useState('')
   const [channelSuccess, setChannelSuccess] = useState('')
+  const hasLoadedRef = useRef(false)
+
+  useEffect(() => {
+    if (hasLoadedRef.current) return
+    if (playlists.length > 0 || importedPlaylists.length === 0) {
+      hasLoadedRef.current = true
+      return
+    }
+
+    hasLoadedRef.current = true
+    const load = async () => {
+      for (const imp of importedPlaylists) {
+        const exists = playlists.some((p) => p.id === imp.id)
+        if (exists) continue
+        try {
+          const playlist = await fetchPlaylistById(imp.id)
+          addPlaylist(playlist)
+        } catch {
+          // Skip failed imports silently
+        }
+      }
+    }
+    load()
+  }, [importedPlaylists, playlists, addPlaylist])
 
   const handleImport = async () => {
     setError('')

@@ -42,3 +42,8 @@ export interface YouTubeSearchResult {
   thumbnail: string
   duration: string
 }
+
+export interface ImportedPlaylist {
+  id: string
+  source: 'youtube' | 'local'
+}
