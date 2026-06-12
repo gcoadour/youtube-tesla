@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { Track, PlayerState, SponsorBlockSegment, ImportedPlaylist, Playlist } from '../types'
 
 const STORAGE_KEY = 'yt-imported-playlists'
+const PLAYLISTS_KEY = 'yt-playlists'
 
 function loadImportedIds(): ImportedPlaylist[] {
   try {
@@ -13,6 +14,18 @@ function loadImportedIds(): ImportedPlaylist[] {
 
 function saveImportedIds(playlists: ImportedPlaylist[]): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(playlists))
+}
+
+function loadPlaylists(): Playlist[] {
+  try {
+    return JSON.parse(localStorage.getItem(PLAYLISTS_KEY) || '[]')
+  } catch {
+    return []
+  }
+}
+
+function savePlaylists(playlists: Playlist[]): void {
+  localStorage.setItem(PLAYLISTS_KEY, JSON.stringify(playlists))
 }
 
 interface PlayerStore extends PlayerState {
@@ -57,7 +70,7 @@ export const usePlayerStore = create<PlayerStore>((set, get) => ({
   isMuted: false,
   shuffle: false,
   repeat: 'off',
-  playlists: [],
+  playlists: loadPlaylists(),
   importedPlaylists: loadImportedIds(),
   likedTracks: new Set(JSON.parse(localStorage.getItem('yt-liked-tracks') || '[]')),
   sponsorBlockSegments: [],
@@ -149,7 +162,10 @@ export const usePlayerStore = create<PlayerStore>((set, get) => ({
     set({ likedTracks: next })
   },
 
-  setPlaylists: (playlists) => set({ playlists }),
+  setPlaylists: (playlists) => {
+    savePlaylists(playlists)
+    set({ playlists })
+  },
 
   addPlaylist: (playlist) => {
     const { importedPlaylists } = get()
@@ -157,12 +173,20 @@ export const usePlayerStore = create<PlayerStore>((set, get) => ({
     if (!exists) {
       const updated = [...importedPlaylists, { id: playlist.id, source: playlist.source }]
       saveImportedIds(updated)
-      set((s) => ({
-        playlists: [...s.playlists, playlist],
-        importedPlaylists: updated,
-      }))
+      set((s) => {
+        const newPlaylists = [...s.playlists, playlist]
+        savePlaylists(newPlaylists)
+        return {
+          playlists: newPlaylists,
+          importedPlaylists: updated,
+        }
+      })
     } else {
-      set((s) => ({ playlists: [...s.playlists, playlist] }))
+      set((s) => {
+        const newPlaylists = [...s.playlists, playlist]
+        savePlaylists(newPlaylists)
+        return { playlists: newPlaylists }
+      })
     }
   },
 
@@ -170,16 +194,22 @@ export const usePlayerStore = create<PlayerStore>((set, get) => ({
     const { importedPlaylists } = get()
     const updated = importedPlaylists.filter((p) => p.id !== id)
     saveImportedIds(updated)
-    set((s) => ({
-      playlists: s.playlists.filter((p) => p.id !== id),
-      importedPlaylists: updated,
-    }))
+    set((s) => {
+      const newPlaylists = s.playlists.filter((p) => p.id !== id)
+      savePlaylists(newPlaylists)
+      return {
+        playlists: newPlaylists,
+        importedPlaylists: updated,
+      }
+    })
   },
 
   updatePlaylistTracks: (id, tracks) =>
-    set((s) => ({
-      playlists: s.playlists.map((p) =>
+    set((s) => {
+      const newPlaylists = s.playlists.map((p) =>
         p.id === id ? { ...p, tracks } : p
-      ),
-    })),
+      )
+      savePlaylists(newPlaylists)
+      return { playlists: newPlaylists }
+    }),
 }))
