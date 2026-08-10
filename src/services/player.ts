@@ -6,8 +6,10 @@
  * pas déployé sur GitHub Pages.
  */
 
-import { getAudioStreamUrl as getInvidiousUrl } from './invidious'
+import { getAudioStreamUrl as getInvidiousUrl, audioUrlFor } from './invidious'
 import { getAudioStreamUrl as getPipedUrl } from './piped'
+import { getAvailableInstances } from './instances'
+import { proxyVariants, proxyOrigin } from './corsProxy'
 
 /**
  * Le proxy yt-dlp n'existe que dans le serveur de développement Vite.
@@ -26,7 +28,7 @@ export const DEV_PROXY_ORIGIN = 'dev-proxy'
 
 export interface ResolvedStream {
   url: string
-  source: 'dev-proxy' | 'invidious' | 'piped'
+  source: 'dev-proxy' | 'invidious' | 'piped' | 'proxy'
   /** Origine de l'instance ayant fourni l'URL, à exclure si le flux échoue. */
   origin: string
 }
@@ -62,6 +64,23 @@ export async function resolveStream(
     return { url, source: 'piped', origin }
   } catch (err) {
     errors.push(`Piped : ${err instanceof Error ? err.message : String(err)}`)
+  }
+
+  /*
+   * Dernier recours : le flux relayé par un proxy CORS public.
+   *
+   * Un <audio> n'est pas soumis au CORS, donc ce détour ne sert pas à contourner
+   * le CORS mais le **dispositif anti-bot** : la requête part du serveur relais,
+   * avec une autre adresse IP et sans en-tête Origin. Limites à connaître — ces
+   * relais gèrent mal les requêtes Range, donc le déplacement dans la piste peut
+   * être approximatif, et leur débit est bridé.
+   */
+  for (const instance of getAvailableInstances('invidious')) {
+    for (const { proxy, url } of proxyVariants(audioUrlFor(instance.origin, videoId))) {
+      const origin = proxyOrigin(proxy.id, instance.origin)
+      if (excluded.has(origin)) continue
+      return { url, source: 'proxy', origin }
+    }
   }
 
   throw new Error(

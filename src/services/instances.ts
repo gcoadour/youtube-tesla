@@ -11,6 +11,8 @@
  * et sont vérifiées par un health-check.
  */
 
+import { proxyVariants } from './corsProxy'
+
 const INSTANCES_API = 'https://api.invidious.io/instances.json'
 const STORAGE_KEY = 'yt-instances'
 const REFRESH_INTERVAL = 30 * 60 * 1000 // 30 minutes
@@ -421,6 +423,13 @@ export interface InstanceResponse {
  */
 const DEFAULT_MAX_ATTEMPTS = 4
 
+/**
+ * Instances reprises via un relais CORS quand tout le direct a échoué.
+ * Volontairement bas : chaque instance est retentée avec plusieurs relais, et
+ * le produit des deux deviendrait vite interminable.
+ */
+const PROXY_INSTANCE_ATTEMPTS = 2
+
 export interface FetchOptions {
   /** Origines déjà essayées sans succès, à ne pas retenter. */
   exclude?: Iterable<string>
@@ -520,6 +529,43 @@ export async function fetchFromInstances(
       // réponse, presque toujours faute d'en-tête CORS sur l'instance.
       const reason = err instanceof Error ? err.message : String(err)
       failures.push(`${host} : ${reason}`)
+    }
+  }
+
+  /*
+   * Seconde chance par relais CORS. N'intervient qu'ici, une fois tout le
+   * direct épuisé : le direct est plus rapide, ne dépend de personne et
+   * n'expose pas la requête à un tiers.
+   */
+  for (const instance of candidates.slice(0, PROXY_INSTANCE_ATTEMPTS)) {
+    const host = instance.origin.replace(/^https?:\/\//, '')
+    for (const { proxy, url } of proxyVariants(`${instance.apiUrl}${path}`)) {
+      try {
+        const res = await fetchWithTimeout(url, options.timeoutMs ?? REQUEST_TIMEOUT, options.request)
+        if (!res.ok) {
+          failures.push(`${host} via ${proxy.label} HTTP ${res.status}`)
+          continue
+        }
+        let data: any
+        try {
+          data = await res.json()
+        } catch {
+          failures.push(`${host} via ${proxy.label} : réponse non-JSON`)
+          continue
+        }
+        if (data?.error) {
+          failures.push(`${host} via ${proxy.label} : ${String(data.error)}`)
+          continue
+        }
+        if (options.accept && !options.accept(data)) {
+          failures.push(`${host} via ${proxy.label} : réponse inexploitable`)
+          continue
+        }
+        boostInstance(instance.origin)
+        return { data, instance }
+      } catch (err) {
+        failures.push(`${host} via ${proxy.label} : ${err instanceof Error ? err.message : String(err)}`)
+      }
     }
   }
 

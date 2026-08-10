@@ -7,6 +7,8 @@ import type { Instance, InstanceKind } from '../services/instances'
 import { diagnoseInstances } from '../services/diagnostics'
 import type { InstanceDiagnostic } from '../services/diagnostics'
 import { createPrimedProbe } from '../services/audioUnlock'
+import { getProxyMode, setProxyMode, CORS_PROXIES } from '../services/corsProxy'
+import type { ProxyMode } from '../services/corsProxy'
 import { getThemePreference, setThemePreference, resolveTheme, watchSystemTheme } from '../services/theme'
 import type { ThemePreference } from '../services/theme'
 import { TrashIcon, ArrowUpIcon, RefreshIcon } from '../components/common/Icons'
@@ -40,6 +42,8 @@ export default function SettingsPage() {
 
   const [instances, setInstances] = useState<Instance[]>([])
   const [checking, setChecking] = useState(false)
+  const [proxyMode, setProxyModeState] = useState<ProxyMode>(getProxyMode)
+
   const [diagnostics, setDiagnostics] = useState<InstanceDiagnostic[]>([])
   const [diagnosing, setDiagnosing] = useState(false)
 
@@ -303,6 +307,39 @@ export default function SettingsPage() {
           </button>
         </div>
         {instanceError && <p className="error-text">{instanceError}</p>}
+      </section>
+
+      <section className="settings-section">
+        <h2>Relais CORS</h2>
+        <p className="settings-desc">
+          Les instances publiques doivent déployer un dispositif anti-bot et ne renvoient pas
+          d'en-tête CORS : depuis un site statique, aucun appel direct n'aboutit. Un relais public
+          refait la requête côté serveur et renvoie le résultat exploitable.
+        </p>
+        <p className="settings-desc">
+          Le direct reste toujours essayé en premier ; le relais n'intervient qu'ensuite. À
+          savoir : vos requêtes transitent alors par un tiers, ces services gratuits sont bridés,
+          et le relais peut lui-même se voir opposer le défi anti-bot de l'instance. Relais
+          essayés dans l'ordre : {CORS_PROXIES.map((p) => p.label).join(', ')}.
+        </p>
+
+        <div className="theme-options" role="radiogroup" aria-label="Relais CORS">
+          {([
+            { value: 'auto' as ProxyMode, label: 'Activé', hint: 'En secours, après échec du direct' },
+            { value: 'off' as ProxyMode, label: 'Désactivé', hint: 'Direct uniquement, rien ne sort vers un tiers' },
+          ]).map((option) => (
+            <button
+              key={option.value}
+              className={`theme-option ${proxyMode === option.value ? 'selected' : ''}`}
+              onClick={() => { setProxyMode(option.value); setProxyModeState(option.value) }}
+              role="radio"
+              aria-checked={proxyMode === option.value}
+            >
+              <span className="theme-option-label">{option.label}</span>
+              <span className="theme-option-hint">{option.hint}</span>
+            </button>
+          ))}
+        </div>
       </section>
 
       <section className="settings-section">
