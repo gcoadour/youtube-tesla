@@ -3,7 +3,7 @@
  * ce module ne s'occupe plus que des endpoints.
  */
 
-import { fetchFromInstances, getAvailableInstances } from './instances'
+import { fetchFromInstances } from './instances'
 import type { Track } from '../types'
 
 /** Nombre de vidéos renvoyées par page par l'API playlists d'Invidious. */
@@ -78,18 +78,30 @@ export async function getPlaylist(playlistId: string, maxPages = 20): Promise<In
   // pagination donnerait un ordre incohérent.
   while (lastCount >= PLAYLIST_PAGE_SIZE && page < maxPages) {
     page++
+    const pagePath = `/playlists/${encodeURIComponent(playlistId)}?page=${page}`
+
+    let videos: any[] | null = null
     try {
-      const res = await fetch(
-        `${first.instance.apiUrl}/playlists/${encodeURIComponent(playlistId)}?page=${page}`,
-      )
-      if (!res.ok) break
-      const pageData = await res.json()
-      const added = appendPage(pageData?.videos || [])
-      if (added === 0) break
-      lastCount = added
+      const res = await fetch(`${first.instance.apiUrl}${pagePath}`)
+      if (res.ok) videos = (await res.json())?.videos || []
     } catch {
-      break
+      videos = null
     }
+
+    // L'instance qui a servi la première page a lâché : `?page=` est sans état
+    // côté Invidious, la suite peut donc venir d'une autre instance. Le
+    // dédoublonnage absorbe le recouvrement éventuel.
+    if (videos === null) {
+      try {
+        videos = (await fetchFromInstances('invidious', pagePath)).data?.videos || []
+      } catch {
+        break
+      }
+    }
+
+    const added = appendPage(videos || [])
+    if (added === 0) break
+    lastCount = added
   }
 
   return {
@@ -171,19 +183,24 @@ export async function getChannelPlaylistIds(
  * par l'instance, qui répond avec CORS et gère les requêtes Range.
  *
  * itag 140 = AAC 128 kb/s, le format audio le plus universellement présent.
+ *
+ * `exclude` porte les origines dont le flux a déjà échoué pour cette piste :
+ * l'appelant peut ainsi parcourir les instances une à une.
  */
-export async function getAudioStreamUrl(videoId: string): Promise<string> {
-  const available = getAvailableInstances('invidious')
-  if (available.length === 0) {
-    throw new Error('Aucune instance Invidious disponible')
-  }
-
+export async function getAudioStreamUrl(
+  videoId: string,
+  exclude: Iterable<string> = [],
+): Promise<{ url: string; origin: string }> {
   // On vérifie que la vidéo est lisible avant de renvoyer une URL de flux :
   // cela évite de coller au <audio> une URL qui répondra 403.
   const { instance } = await fetchFromInstances(
     'invidious',
     `/videos/${encodeURIComponent(videoId)}`,
+    { exclude },
   )
 
-  return `${instance.origin}/latest_version?id=${encodeURIComponent(videoId)}&itag=140&local=true`
+  return {
+    url: `${instance.origin}/latest_version?id=${encodeURIComponent(videoId)}&itag=140&local=true`,
+    origin: instance.origin,
+  }
 }

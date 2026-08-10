@@ -2,7 +2,6 @@ import { useEffect, useRef } from 'react'
 import { usePlayerStore } from '../store/playerStore'
 import { getSponsorSegments, getCurrentSegment } from '../services/sponsorblock'
 import { resolveStream } from '../services/player'
-import type { ResolvedStream } from '../services/player'
 import { getCachedAudio } from '../services/audioCache'
 
 /**
@@ -20,8 +19,8 @@ export function useAudioPlayer() {
   /** Incrémenté à chaque changement de piste : invalide les chargements en vol. */
   const loadIdRef = useRef(0)
   const objectUrlRef = useRef<string | null>(null)
-  /** Sources déjà tentées sans succès pour la piste courante. */
-  const failedSourcesRef = useRef<ResolvedStream['source'][]>([])
+  /** Origines d'instances déjà tentées sans succès pour la piste courante. */
+  const triedOriginsRef = useRef<Set<string>>(new Set())
 
   const currentTrack = usePlayerStore((s) => s.currentTrack)
   const isPlaying = usePlayerStore((s) => s.isPlaying)
@@ -42,7 +41,11 @@ export function useAudioPlayer() {
       if (Number.isFinite(time)) audio.currentTime = time
     })
     store.registerPlayerReplay(() => {
-      audio.play().catch(() => usePlayerStore.getState().pause())
+      audio.play().catch((err) => {
+        if ((err as { name?: string })?.name === 'NotAllowedError') {
+          usePlayerStore.getState().pause()
+        }
+      })
     })
 
     return () => {
@@ -64,7 +67,7 @@ export function useAudioPlayer() {
     if (!audio || !currentTrack) return
 
     const loadId = ++loadIdRef.current
-    failedSourcesRef.current = []
+    triedOriginsRef.current = new Set()
     const isStale = () => loadId !== loadIdRef.current
 
     const revokeObjectUrl = () => {
@@ -79,6 +82,24 @@ export function useAudioPlayer() {
     store.setPlaybackError(null)
     store.setSponsorBlockSegments([])
 
+    /**
+     * Un `play()` rejeté n'a pas toujours le même sens.
+     *
+     * NotAllowedError = le navigateur exige un geste utilisateur : l'intention
+     * de lecture doit alors être annulée, sans quoi l'interface afficherait
+     * « en lecture » sans qu'aucun son ne sorte.
+     *
+     * Toute autre erreur vient du flux lui-même. Elle est déjà traitée par
+     * `handleError`, qui bascule sur l'instance suivante — mettre le store en
+     * pause ici laisserait le lecteur muet après un repli pourtant réussi.
+     */
+    const handlePlayRejection = (err: unknown) => {
+      if (isStale()) return
+      if ((err as { name?: string })?.name === 'NotAllowedError') {
+        usePlayerStore.getState().pause()
+      }
+    }
+
     const applySource = async () => {
       // Une piste téléchargée pour l'écoute hors ligne court-circuite le réseau.
       const cached = await getCachedAudio(currentTrack.videoId)
@@ -90,19 +111,17 @@ export function useAudioPlayer() {
         objectUrlRef.current = URL.createObjectURL(cached)
         audio.src = objectUrlRef.current
       } else {
-        const stream = await resolveStream(currentTrack.videoId, failedSourcesRef.current)
+        // L'origine retenue est marquée avant lecture : si le flux échoue,
+        // la tentative suivante repartira sur l'instance d'après.
+        const stream = await resolveStream(currentTrack.videoId, triedOriginsRef.current)
         if (isStale()) return
-        failedSourcesRef.current = [...failedSourcesRef.current, stream.source]
+        triedOriginsRef.current.add(stream.origin)
         audio.src = stream.url
       }
 
       audio.load()
       if (usePlayerStore.getState().isPlaying) {
-        audio.play().catch(() => {
-          // Lecture refusée faute de geste utilisateur : on ne traite pas ça
-          // comme une panne de source, l'utilisateur retouchera « lecture ».
-          if (!isStale()) usePlayerStore.getState().pause()
-        })
+        audio.play().catch(handlePlayRejection)
       }
     }
 
@@ -127,8 +146,9 @@ export function useAudioPlayer() {
 
     /**
      * L'élément audio rejette le flux : URL expirée, instance qui renvoie 403,
-     * format refusé. On rebascule sur la source suivante ; quand elles sont
-     * toutes épuisées, on signale et on passe à la piste suivante.
+     * format refusé. On repart sur l'instance suivante — toutes les instances
+     * Invidious, puis toutes les instances Piped. Quand il n'en reste plus,
+     * `resolveStream` lève, on signale et on passe à la piste suivante.
      */
     const handleError = () => {
       if (isStale()) return
@@ -171,7 +191,11 @@ export function useAudioPlayer() {
     if (!audio || !audio.src) return
 
     if (isPlaying && audio.paused) {
-      audio.play().catch(() => usePlayerStore.getState().pause())
+      audio.play().catch((err) => {
+        if ((err as { name?: string })?.name === 'NotAllowedError') {
+          usePlayerStore.getState().pause()
+        }
+      })
     } else if (!isPlaying && !audio.paused) {
       audio.pause()
     }

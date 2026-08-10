@@ -1,9 +1,9 @@
 /**
- * Résolution de l'URL audio d'une vidéo, avec repli entre sources.
+ * Résolution de l'URL audio d'une vidéo, avec repli instance par instance.
  *
- * Ordre : proxy de développement (yt-dlp) → Invidious relayé → Piped.
- * En production seuls les deux derniers existent : le proxy Vite n'est pas
- * déployé sur GitHub Pages.
+ * Ordre : proxy de développement (yt-dlp) → instances Invidious → instances
+ * Piped. En production seules les deux dernières existent : le proxy Vite n'est
+ * pas déployé sur GitHub Pages.
  */
 
 import { getAudioStreamUrl as getInvidiousUrl } from './invidious'
@@ -21,39 +21,47 @@ function isDev(): boolean {
   return import.meta.env.DEV
 }
 
+/** Origine fictive du proxy de développement, pour l'exclure comme les autres. */
+export const DEV_PROXY_ORIGIN = 'dev-proxy'
+
 export interface ResolvedStream {
   url: string
   source: 'dev-proxy' | 'invidious' | 'piped'
+  /** Origine de l'instance ayant fourni l'URL, à exclure si le flux échoue. */
+  origin: string
 }
 
 /**
- * `exclude` permet de redemander une URL en sautant une source qui vient
- * d'échouer — utilisé quand l'élément <audio> rejette le flux.
+ * Renvoie la première URL de flux exploitable.
+ *
+ * `tried` contient les origines déjà écartées pour cette piste : une instance
+ * dont le flux vient d'échouer y est ajoutée par l'appelant, si bien que des
+ * appels successifs parcourent toutes les instances Invidious puis toutes les
+ * instances Piped avant d'abandonner.
  */
 export async function resolveStream(
   videoId: string,
-  exclude: ResolvedStream['source'][] = [],
+  tried: Iterable<string> = [],
 ): Promise<ResolvedStream> {
+  const excluded = new Set(tried)
   const errors: string[] = []
 
-  if (isDev() && !exclude.includes('dev-proxy')) {
-    return { url: `/api/yt-audio/${videoId}`, source: 'dev-proxy' }
+  if (isDev() && !excluded.has(DEV_PROXY_ORIGIN)) {
+    return { url: `/api/yt-audio/${videoId}`, source: 'dev-proxy', origin: DEV_PROXY_ORIGIN }
   }
 
-  if (!exclude.includes('invidious')) {
-    try {
-      return { url: await getInvidiousUrl(videoId), source: 'invidious' }
-    } catch (err) {
-      errors.push(`Invidious : ${err instanceof Error ? err.message : String(err)}`)
-    }
+  try {
+    const { url, origin } = await getInvidiousUrl(videoId, excluded)
+    return { url, source: 'invidious', origin }
+  } catch (err) {
+    errors.push(`Invidious : ${err instanceof Error ? err.message : String(err)}`)
   }
 
-  if (!exclude.includes('piped')) {
-    try {
-      return { url: await getPipedUrl(videoId), source: 'piped' }
-    } catch (err) {
-      errors.push(`Piped : ${err instanceof Error ? err.message : String(err)}`)
-    }
+  try {
+    const { url, origin } = await getPipedUrl(videoId, excluded)
+    return { url, source: 'piped', origin }
+  } catch (err) {
+    errors.push(`Piped : ${err instanceof Error ? err.message : String(err)}`)
   }
 
   throw new Error(
@@ -70,12 +78,32 @@ export async function getAudioStreamUrl(videoId: string): Promise<string> {
 /**
  * Télécharge la piste entière pour le cache hors ligne.
  * Réservé au téléchargement explicite : la lecture, elle, streame.
+ *
+ * Comme pour la lecture, un échec fait passer à l'instance suivante.
  */
 export async function getAudioBlob(videoId: string): Promise<Blob> {
-  const { url } = await resolveStream(videoId)
-  const response = await fetch(url)
-  if (!response.ok) {
-    throw new Error(`Téléchargement impossible : ${response.status} ${response.statusText}`)
+  const tried = new Set<string>()
+  let lastError: Error | null = null
+
+  // Bornage large : la boucle s'arrête d'elle-même quand resolveStream n'a plus
+  // d'instance à proposer.
+  for (let attempt = 0; attempt < 12; attempt++) {
+    let stream: ResolvedStream
+    try {
+      stream = await resolveStream(videoId, tried)
+    } catch (err) {
+      throw lastError ?? (err instanceof Error ? err : new Error(String(err)))
+    }
+
+    tried.add(stream.origin)
+    try {
+      const response = await fetch(stream.url)
+      if (response.ok) return await response.blob()
+      lastError = new Error(`${response.status} ${response.statusText} (${stream.origin})`)
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err))
+    }
   }
-  return response.blob()
+
+  throw lastError ?? new Error('Téléchargement impossible')
 }

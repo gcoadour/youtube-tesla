@@ -1,56 +1,52 @@
 /**
- * Découverte et classement des instances publiques Invidious / Piped.
+ * Découverte et classement des instances Invidious / Piped.
  *
- * L'ancienne implémentation dépendait de https://api.invidious.io/instances.json,
- * qui n'est plus maintenue : dès qu'elle échouait, la liste restait vide et toute
- * l'application (recherche, import, lecture) tombait sur « No instances available ».
+ * Les instances Invidious proviennent de l'API officielle
+ * https://api.invidious.io/instances.json. La réponse est mise en cache dans
+ * localStorage : une indisponibilité passagère de l'API ne doit pas priver
+ * l'application de toute source. Une poignée d'instances documentées sert de
+ * dernier recours au tout premier lancement, si l'API n'a jamais répondu.
  *
- * On part donc d'une liste embarquée, on la vérifie au démarrage par un health-check
- * parallèle, et on classe les instances par score. Les échecs pénalisent, les succès
- * favorisent. L'utilisateur peut ajouter/prioriser une instance depuis les Réglages,
- * ce qui est le seul recours quand une instance publique se fait bloquer par YouTube.
+ * Piped n'expose pas d'annuaire équivalent : ses instances restent listées ici
+ * et sont vérifiées par un health-check.
  */
+
+const INSTANCES_API = 'https://api.invidious.io/instances.json'
+const STORAGE_KEY = 'yt-instances'
+const REFRESH_INTERVAL = 30 * 60 * 1000 // 30 minutes
+const REQUEST_TIMEOUT = 6000
+const DEFAULT_SCORE = 50
 
 export type InstanceKind = 'invidious' | 'piped'
 
 export interface Instance {
   kind: InstanceKind
-  /** Origine sans slash final, ex. https://yewtu.be */
+  /** Origine sans slash final, ex. https://inv.nadeko.net */
   origin: string
-  /** Base de l'API, ex. https://yewtu.be/api/v1 */
+  /** Base de l'API, ex. https://inv.nadeko.net/api/v1 */
   apiUrl: string
   score: number
   penalizedUntil: number
-  /** true tant que le health-check n'a pas répondu */
+  /** true tant qu'aucune vérification n'a eu lieu */
   unverified: boolean
-  /** Ajoutée à la main par l'utilisateur : jamais retirée automatiquement */
+  /** Ajoutée à la main : jamais retirée par un rafraîchissement */
   userAdded: boolean
 }
 
-const STORAGE_KEY = 'yt-instances'
-const REFRESH_INTERVAL = 30 * 60 * 1000 // 30 minutes
-const HEALTH_TIMEOUT = 4000
-const DEFAULT_SCORE = 50
-
 /**
- * Instances Invidious publiques officielles, dans l'ordre de la documentation
- * (de la plus ancienne à la plus récente) :
- * https://docs.invidious.io/instances/ — relevé le 2026-08-10.
- *
- * La documentation avertit que « toute instance publique absente de cette liste
- * est considérée comme non fiable », d'où le choix de n'embarquer que celles-ci.
- * La liste est courte et bouge : à réviser depuis la source ci-dessus quand la
- * lecture devient instable, ou à compléter au cas par cas depuis Réglages.
+ * Amorçage à froid : instances publiques documentées sur
+ * https://docs.invidious.io/instances/. Utilisées uniquement si l'API n'a
+ * jamais pu être jointe et qu'aucun cache n'existe.
  */
-const INVIDIOUS_SEEDS = [
-  'https://inv.nadeko.net',          // CL — protégée par un défi anti-bot « Go-away »
-  'https://invidious.nerdvpn.de',    // UA
-  'https://yt.chocolatemoo53.com',   // US
-  'https://invidious.tiekoetter.com',// DE
-  'https://invidious.f5.si',         // JP
+const COLD_START_INVIDIOUS = [
+  'https://inv.nadeko.net',
+  'https://invidious.nerdvpn.de',
+  'https://yt.chocolatemoo53.com',
+  'https://invidious.tiekoetter.com',
+  'https://invidious.f5.si',
 ]
 
-/** Instances Piped (API). Les flux audio Piped sont déjà relayés avec CORS. */
+/** Instances Piped (API). Leurs flux audio sont déjà relayés avec CORS. */
 const PIPED_SEEDS = [
   'https://pipedapi.kavin.rocks',
   'https://pipedapi.adminforge.de',
@@ -75,54 +71,32 @@ function makeInstance(kind: InstanceKind, origin: string, userAdded = false): In
   }
 }
 
-function seedInstances(): Instance[] {
-  return [
-    ...INVIDIOUS_SEEDS.map((o) => makeInstance('invidious', o)),
-    ...PIPED_SEEDS.map((o) => makeInstance('piped', o)),
-  ]
-}
-
 let instances: Instance[] = []
-let lastHealthCheck = 0
-let healthPromise: Promise<void> | null = null
+let lastApiFetch = 0
+let lastPipedCheck = 0
+let refreshPromise: Promise<void> | null = null
 
 function sortInstances(): void {
   instances.sort((a, b) => b.score - a.score)
 }
 
-// --- persistance -----------------------------------------------------------
+async function fetchWithTimeout(url: string, ms = REQUEST_TIMEOUT): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), ms)
+  try {
+    return await fetch(url, { signal: controller.signal })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// --- persistance -------------------------------------------------------------
 
 interface StoredInstance {
   kind: InstanceKind
   origin: string
   score: number
   userAdded: boolean
-}
-
-function load(): void {
-  const seeds = seedInstances()
-  let stored: StoredInstance[] = []
-  try {
-    stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]')
-  } catch {
-    stored = []
-  }
-
-  const byOrigin = new Map(seeds.map((i) => [i.origin, i]))
-  for (const s of stored) {
-    if (!s?.origin || (s.kind !== 'invidious' && s.kind !== 'piped')) continue
-    const existing = byOrigin.get(s.origin)
-    if (existing) {
-      // On reprend le score appris lors des sessions précédentes.
-      existing.score = typeof s.score === 'number' ? s.score : DEFAULT_SCORE
-      existing.userAdded = existing.userAdded || !!s.userAdded
-    } else if (s.userAdded) {
-      byOrigin.set(s.origin, { ...makeInstance(s.kind, s.origin, true), score: s.score ?? DEFAULT_SCORE })
-    }
-  }
-
-  instances = [...byOrigin.values()]
-  sortInstances()
 }
 
 function persist(): void {
@@ -135,25 +109,128 @@ function persist(): void {
     }))
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
   } catch {
-    // quota plein ou stockage indisponible : le classement en mémoire suffit
+    // Stockage plein ou indisponible : le classement en mémoire suffit.
   }
+}
+
+function load(): void {
+  let stored: StoredInstance[] = []
+  try {
+    stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]')
+  } catch {
+    stored = []
+  }
+
+  const byOrigin = new Map<string, Instance>()
+
+  for (const s of stored) {
+    if (!s?.origin || (s.kind !== 'invidious' && s.kind !== 'piped')) continue
+    byOrigin.set(s.origin, {
+      ...makeInstance(s.kind, s.origin, !!s.userAdded),
+      score: typeof s.score === 'number' ? s.score : DEFAULT_SCORE,
+    })
+  }
+
+  // Piped n'a pas d'annuaire : ses instances sont toujours réinjectées.
+  for (const origin of PIPED_SEEDS) {
+    if (!byOrigin.has(origin)) byOrigin.set(origin, makeInstance('piped', origin))
+  }
+
+  // Amorçage à froid : aucune instance Invidious connue.
+  if (![...byOrigin.values()].some((i) => i.kind === 'invidious')) {
+    for (const origin of COLD_START_INVIDIOUS) {
+      byOrigin.set(origin, makeInstance('invidious', origin))
+    }
+  }
+
+  instances = [...byOrigin.values()]
+  sortInstances()
 }
 
 load()
 
-// --- health-check ----------------------------------------------------------
+// --- annuaire Invidious ------------------------------------------------------
 
-function healthPath(kind: InstanceKind): string {
-  return kind === 'invidious' ? '/stats' : '/healthcheck'
+/**
+ * Le champ `monitor` de l'API a changé de forme au fil des versions ; on lit
+ * les variantes connues plutôt que de supposer une seule structure.
+ */
+function uptimeOf(monitor: any): number {
+  if (typeof monitor?.uptime === 'number') return monitor.uptime
+  const ratio = monitor?.['30dRatio']?.ratio ?? monitor?.['90dRatio']?.ratio
+  const parsed = parseFloat(ratio)
+  return Number.isFinite(parsed) ? parsed : DEFAULT_SCORE
 }
 
-async function checkOne(inst: Instance): Promise<void> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), HEALTH_TIMEOUT)
-  try {
-    const res = await fetch(`${inst.apiUrl}${healthPath(inst.kind)}`, {
-      signal: controller.signal,
+function playbackRatioOf(stats: any): number {
+  const playback = stats?.playback
+  if (typeof playback?.ratio === 'number') return playback.ratio
+  const total = playback?.totalRequests
+  const ok = playback?.successfulRequests
+  if (typeof total === 'number' && total > 0 && typeof ok === 'number') return ok / total
+  return 0.5
+}
+
+function scoreFromApi(info: any): number {
+  const uptime = uptimeOf(info?.monitor)
+  const playback = playbackRatioOf(info?.stats)
+  // CORS est indispensable depuis un navigateur : une instance qui l'annonce
+  // explicitement passe devant celles dont le champ est absent.
+  const corsBonus = info?.cors === true ? 10 : 0
+  return Math.min(100, uptime * 0.5 + playback * 100 * 0.4 + corsBonus)
+}
+
+async function refreshFromApi(): Promise<void> {
+  const res = await fetchWithTimeout(INSTANCES_API)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+
+  const data: [string, any][] = await res.json()
+  if (!Array.isArray(data) || data.length === 0) throw new Error('Réponse vide')
+
+  const discovered: Instance[] = []
+  for (const entry of data) {
+    const info = Array.isArray(entry) ? entry[1] : null
+    if (!info?.uri) continue
+    // Seules les instances HTTPS avec API et CORS sont exploitables ici :
+    // onion/i2p sont injoignables depuis la voiture, et une instance sans CORS
+    // échouerait à chaque requête du navigateur.
+    if (info.type !== 'https') continue
+    if (info.api === false) continue
+    if (info.cors === false) continue
+
+    discovered.push({
+      ...makeInstance('invidious', info.uri),
+      score: scoreFromApi(info),
+      unverified: false,
     })
+  }
+
+  if (discovered.length === 0) throw new Error('Aucune instance exploitable')
+
+  const kept = instances.filter(
+    (i) => i.kind === 'piped' || (i.userAdded && !discovered.some((d) => d.origin === i.origin)),
+  )
+  // Un ajout manuel garde la priorité que l'utilisateur lui a donnée.
+  const manual = new Map(instances.filter((i) => i.userAdded).map((i) => [i.origin, i]))
+  for (const d of discovered) {
+    const existing = manual.get(d.origin)
+    if (existing) {
+      d.userAdded = true
+      d.score = Math.max(d.score, existing.score)
+    }
+  }
+
+  instances = [...discovered, ...kept]
+  sortInstances()
+  persist()
+  lastApiFetch = Date.now()
+}
+
+// --- health-check Piped ------------------------------------------------------
+
+async function checkPiped(inst: Instance): Promise<void> {
+  try {
+    const res = await fetchWithTimeout(`${inst.apiUrl}/healthcheck`, 4000)
     inst.unverified = false
     if (res.ok) {
       inst.score = Math.min(100, inst.score + 25)
@@ -166,44 +243,61 @@ async function checkOne(inst: Instance): Promise<void> {
     inst.unverified = false
     inst.score = Math.max(1, inst.score - 25)
     inst.penalizedUntil = Date.now() + 5 * 60_000
-  } finally {
-    clearTimeout(timer)
   }
 }
 
 /**
- * Vérifie toutes les instances en parallèle. Idempotent et throttlé :
- * un appel pendant un check en cours attend simplement le même résultat.
+ * Rafraîchit l'annuaire Invidious et vérifie les instances Piped.
+ * Throttlé, et idempotent : les appels concurrents partagent la même promesse.
  */
 export function checkInstances(force = false): Promise<void> {
   const now = Date.now()
-  if (!force && now - lastHealthCheck < REFRESH_INTERVAL && lastHealthCheck > 0) {
-    return healthPromise ?? Promise.resolve()
-  }
-  if (healthPromise) return healthPromise
+  const apiStale = force || now - lastApiFetch >= REFRESH_INTERVAL
+  const pipedStale = force || now - lastPipedCheck >= REFRESH_INTERVAL
 
-  lastHealthCheck = now
-  healthPromise = Promise.all(instances.map(checkOne))
+  if (!apiStale && !pipedStale) return refreshPromise ?? Promise.resolve()
+  if (refreshPromise) return refreshPromise
+
+  const jobs: Promise<unknown>[] = []
+  if (apiStale) {
+    jobs.push(
+      refreshFromApi().catch(() => {
+        // L'API n'a pas répondu : on garde le cache et on réessaiera au
+        // prochain cycle plutôt que de vider la liste.
+      }),
+    )
+  }
+  if (pipedStale) {
+    lastPipedCheck = now
+    jobs.push(Promise.all(instances.filter((i) => i.kind === 'piped').map(checkPiped)))
+  }
+
+  refreshPromise = Promise.all(jobs)
     .then(() => {
       sortInstances()
       persist()
     })
     .finally(() => {
-      healthPromise = null
+      refreshPromise = null
     })
-  return healthPromise
+
+  return refreshPromise
 }
 
-// --- sélection et scoring --------------------------------------------------
+// --- sélection et scoring ----------------------------------------------------
 
 export function getInstances(kind?: InstanceKind): Instance[] {
   return kind ? instances.filter((i) => i.kind === kind) : [...instances]
 }
 
+/**
+ * Instances utilisables d'une famille, les mieux classées d'abord.
+ * Si toutes sont pénalisées, on les rend quand même : mieux vaut retenter que
+ * refuser la requête.
+ */
 export function getAvailableInstances(kind: InstanceKind): Instance[] {
   const now = Date.now()
   const usable = instances.filter((i) => i.kind === kind && i.penalizedUntil < now)
-  // Si tout est pénalisé, on retente quand même plutôt que d'échouer sèchement.
   return usable.length > 0 ? usable : instances.filter((i) => i.kind === kind)
 }
 
@@ -225,26 +319,24 @@ export function boostInstance(origin: string): void {
   persist()
 }
 
-// --- gestion manuelle (page Réglages) --------------------------------------
+// --- gestion manuelle (page Réglages) ----------------------------------------
 
 export function addUserInstance(kind: InstanceKind, origin: string): Instance | null {
   const clean = origin.trim().replace(/\/+$/, '')
   if (!/^https:\/\/[^\s/]+$/.test(clean)) return null
+
   const existing = instances.find((i) => i.origin === clean)
   if (existing) {
     existing.userAdded = true
     persist()
     return existing
   }
-  // Score de départ élevé : un ajout manuel est un choix délibéré.
+
+  // Score élevé au départ : un ajout manuel est un choix délibéré.
   const inst = { ...makeInstance(kind, clean, true), score: 80 }
   instances.push(inst)
   sortInstances()
   persist()
-  checkOne(inst).then(() => {
-    sortInstances()
-    persist()
-  })
   return inst
 }
 
@@ -262,51 +354,65 @@ export function prioritizeInstance(origin: string): void {
   persist()
 }
 
-// --- requêtes --------------------------------------------------------------
+// --- requêtes ----------------------------------------------------------------
 
 export interface InstanceResponse {
   data: any
   instance: Instance
 }
 
+export interface FetchOptions {
+  /** Origines déjà essayées sans succès, à ne pas retenter. */
+  exclude?: Iterable<string>
+  /** Par défaut : toutes les instances disponibles. */
+  maxAttempts?: number
+  request?: RequestInit
+}
+
 /**
- * Interroge les instances d'une famille en cascade jusqu'à obtenir une réponse.
- * Chaque échec pénalise l'instance, chaque succès la favorise, ce qui fait
- * remonter naturellement les instances qui marchent aujourd'hui.
+ * Interroge les instances d'une famille en cascade.
+ *
+ * Toute erreur — réseau, HTTP, ou erreur applicative renvoyée par l'instance —
+ * fait passer à l'instance suivante, et ainsi de suite jusqu'à épuisement de la
+ * liste. Chaque échec pénalise l'instance et chaque succès la favorise, si bien
+ * que celles qui répondent aujourd'hui remontent d'elles-mêmes en tête.
  */
 export async function fetchFromInstances(
   kind: InstanceKind,
   path: string,
-  options?: RequestInit,
-  maxAttempts = 3,
+  options: FetchOptions = {},
 ): Promise<InstanceResponse> {
   await checkInstances()
 
-  const available = getAvailableInstances(kind)
-  if (available.length === 0) {
+  const exclude = new Set(options.exclude ?? [])
+  const candidates = getAvailableInstances(kind).filter((i) => !exclude.has(i.origin))
+
+  if (candidates.length === 0) {
     throw new Error(`Aucune instance ${kind} disponible`)
   }
 
+  const attempts = Math.min(options.maxAttempts ?? candidates.length, candidates.length)
   let lastError: Error | null = null
-  const attempts = Math.min(maxAttempts, available.length)
 
   for (let i = 0; i < attempts; i++) {
-    const instance = available[i]
+    const instance = candidates[i]
     try {
-      const res = await fetch(`${instance.apiUrl}${path}`, options)
+      const res = await fetch(`${instance.apiUrl}${path}`, options.request)
       if (!res.ok) {
         penalizeInstance(instance.origin)
         lastError = new Error(`HTTP ${res.status} (${instance.origin})`)
         continue
       }
+
       const data = await res.json()
       if (data?.error) {
-        // Erreur applicative : l'instance répond mais ne peut pas servir cette
-        // ressource (playlist privée, vidéo bloquée). On la remonte telle quelle.
+        // L'instance répond mais ne peut pas servir cette ressource (playlist
+        // privée, vidéo bloquée). Pénalité courte : la faute n'est pas la sienne.
         penalizeInstance(instance.origin, 10_000)
         lastError = new Error(String(data.error))
         continue
       }
+
       boostInstance(instance.origin)
       return { data, instance }
     } catch (err) {

@@ -45,7 +45,15 @@ export default function SettingsPage() {
   const refreshInstances = useCallback(() => setInstances(getInstances()), [])
 
   useEffect(() => { refreshCache() }, [refreshCache])
-  useEffect(() => { refreshInstances() }, [refreshInstances])
+
+  // L'annuaire est récupéré de façon asynchrone : afficher `getInstances()` au
+  // montage montrerait la liste d'amorçage, pas celle réellement utilisée.
+  useEffect(() => {
+    let active = true
+    refreshInstances()
+    checkInstances().finally(() => { if (active) refreshInstances() })
+    return () => { active = false }
+  }, [refreshInstances])
 
   const handleCheckInstances = async () => {
     setChecking(true)
@@ -87,17 +95,22 @@ export default function SettingsPage() {
           fonctionne, relancez la vérification, puis remontez ou ajoutez une instance connue.
         </p>
         <p className="settings-desc">
-          La liste officielle des instances Invidious est publiée sur{' '}
-          <a href="https://docs.invidious.io/instances/" target="_blank" rel="noreferrer" className="settings-link">
-            docs.invidious.io/instances
+          La liste Invidious est récupérée automatiquement depuis{' '}
+          <a href="https://api.invidious.io/instances.json" target="_blank" rel="noreferrer" className="settings-link">
+            l'annuaire officiel
           </a>{' '}
-          — les instances qui n'y figurent pas sont considérées comme non fiables par le projet.
+          (instances HTTPS avec API et CORS), et rafraîchie toutes les 30 minutes. En cas
+          d'erreur sur une instance, l'appel repart automatiquement sur la suivante.
         </p>
 
         <div className="settings-row" style={{ marginBottom: 16 }}>
           <button className="btn-secondary" onClick={handleCheckInstances} disabled={checking}>
-            {checking ? 'Vérification…' : 'Vérifier les instances'}
+            {checking ? 'Actualisation…' : 'Actualiser la liste'}
           </button>
+          <span className="settings-desc" style={{ margin: 0 }}>
+            {instances.filter((i) => i.kind === 'invidious').length} Invidious ·{' '}
+            {instances.filter((i) => i.kind === 'piped').length} Piped
+          </span>
         </div>
 
         <div className="instance-list">
@@ -224,7 +237,7 @@ export default function SettingsPage() {
 
       <p className="settings-desc" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <RefreshIcon size={18} />
-        Les scores d'instances sont réévalués automatiquement toutes les 30 minutes.
+        L'annuaire et les scores sont réévalués automatiquement toutes les 30 minutes.
       </p>
     </div>
   )

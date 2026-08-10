@@ -23,12 +23,16 @@ export async function mockInstances(page: Page, options: {
     failInvidious = false,
   } = options
 
-  // Health-checks
-  await page.route('**/api/v1/stats', (route) =>
-    failInvidious
-      ? route.fulfill({ status: 503, body: '' })
-      : route.fulfill({ status: 200, contentType: 'application/json', body: '{"version":"test"}' }),
+  // Annuaire officiel : source unique des instances Invidious.
+  await page.route('**/api.invidious.io/instances.json', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(instancesDirectory()),
+    }),
   )
+
+  // Health-check Piped (Piped n'a pas d'annuaire équivalent).
   await page.route('**/healthcheck', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: '{"status":"ok"}' }),
   )
@@ -115,6 +119,30 @@ function silentWav() {
     headers: { 'content-type': 'audio/wav', 'accept-ranges': 'bytes' },
     body: buffer,
   }
+}
+
+/** Trois instances Invidious, au format renvoyé par api.invidious.io. */
+export function instancesDirectory() {
+  const entry = (host: string, uptime: number) => [
+    host,
+    {
+      uri: `https://${host}`,
+      type: 'https',
+      api: true,
+      cors: true,
+      monitor: { uptime },
+      stats: { playback: { ratio: 0.9 } },
+    },
+  ]
+  return [
+    entry('inv-a.test', 99),
+    entry('inv-b.test', 98),
+    entry('inv-c.test', 97),
+    // Écartées à la lecture de l'annuaire : injoignables ou inutilisables
+    // depuis un navigateur.
+    ['onion.test', { uri: 'http://onion.test', type: 'onion', api: true, cors: true }],
+    ['nocors.test', { uri: 'https://nocors.test', type: 'https', api: true, cors: false }],
+  ]
 }
 
 function defaultSearchResults() {

@@ -104,9 +104,18 @@ export async function getPlaylist(playlistId: string, maxPages = 20): Promise<Pi
 
 /**
  * URL du meilleur flux audio. Déjà relayée par le proxy Piped : CORS et Range présents.
+ *
+ * `exclude` porte les origines dont le flux a déjà échoué pour cette piste.
  */
-export async function getAudioStreamUrl(videoId: string): Promise<string> {
-  const { data } = await fetchFromInstances('piped', `/streams/${encodeURIComponent(videoId)}`)
+export async function getAudioStreamUrl(
+  videoId: string,
+  exclude: Iterable<string> = [],
+): Promise<{ url: string; origin: string }> {
+  const { data, instance } = await fetchFromInstances(
+    'piped',
+    `/streams/${encodeURIComponent(videoId)}`,
+    { exclude },
+  )
 
   const audioStreams: any[] = (data?.audioStreams || [])
     .filter((s: any) => s.url)
@@ -115,5 +124,5 @@ export async function getAudioStreamUrl(videoId: string): Promise<string> {
   if (audioStreams.length === 0) {
     throw new Error('Aucun flux audio disponible via Piped')
   }
-  return audioStreams[0].url
+  return { url: audioStreams[0].url, origin: instance.origin }
 }
