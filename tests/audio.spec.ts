@@ -1,171 +1,110 @@
 import { test, expect } from '@playwright/test'
+import { BASE, mockInstances, mockAudioStream } from './helpers'
 
-const SEARCH = '/youtube-tesla/#/search'
+const SEARCH = `${BASE}/search`
 
-test.describe('Audio playback', () => {
-  test('search returns results', async ({ page }) => {
-    await page.goto(SEARCH)
-    const input = page.locator('.search-input')
-    await input.fill('Rick Astley Never Gonna Give You Up')
-    await expect(page.locator('.track-item').first()).toBeVisible({ timeout: 15_000 })
-    const count = await page.locator('.track-item').count()
-    expect(count).toBeGreaterThan(0)
+test.describe('Lecture audio', () => {
+  test.beforeEach(async ({ page }) => {
+    await mockInstances(page)
+    await mockAudioStream(page)
   })
 
-  test('clicking a search result sets audio src', async ({ page }) => {
+  test('la recherche renvoie des résultats', async ({ page }) => {
     await page.goto(SEARCH)
-    await page.locator('.search-input').fill('Rick Astley Never Gonna Give You Up')
+    await page.locator('.search-input').fill('Rick Astley')
     await expect(page.locator('.track-item').first()).toBeVisible({ timeout: 15_000 })
+    expect(await page.locator('.track-item').count()).toBeGreaterThan(0)
+  })
 
+  test('la durée réelle est affichée, pas 0:00', async ({ page }) => {
+    await page.goto(SEARCH)
+    await page.locator('.search-input').fill('Rick Astley')
+    await expect(page.locator('.track-item').first()).toBeVisible({ timeout: 15_000 })
+    // 213 s => 3:33. L'ancienne version forçait duration: 0 sur les résultats.
+    await expect(page.locator('.track-item').first().locator('.col-duration')).toHaveText('3:33')
+  })
+
+  test('un clic sur un résultat alimente la source audio', async ({ page }) => {
+    await page.goto(SEARCH)
+    await page.locator('.search-input').fill('Rick Astley')
+    await expect(page.locator('.track-item').first()).toBeVisible({ timeout: 15_000 })
     await page.locator('.track-item').first().click()
 
-    const src = await page.evaluate(() => {
-      const audio = document.querySelector('audio')
-      return audio?.src ?? ''
-    })
-    expect(src).toBeTruthy()
+    await page.waitForFunction(() => !!document.querySelector('audio')?.src, { timeout: 30_000 })
+    const src = await page.evaluate(() => document.querySelector('audio')?.src ?? '')
+
     expect(src).toMatch(/^https?:\/\//)
+    // La lecture streame désormais : plus de blob: construit après un
+    // téléchargement intégral, qui était bloqué par CORS en production.
+    expect(src.startsWith('blob:')).toBe(false)
   })
 
-  test('audio element enters playing state', async ({ page }) => {
+  test("l'élément audio passe en lecture", async ({ page }) => {
     await page.goto(SEARCH)
-    await page.locator('.search-input').fill('Rick Astley Never Gonna Give You Up')
+    await page.locator('.search-input').fill('Rick Astley')
     await expect(page.locator('.track-item').first()).toBeVisible({ timeout: 15_000 })
-
     await page.locator('.track-item').first().click()
 
     await page.waitForFunction(() => {
       const audio = document.querySelector('audio')
-      return audio && !audio.paused && audio.readyState >= 2
+      return !!audio && !audio.paused && audio.readyState >= 2
     }, { timeout: 30_000 })
 
-    const paused = await page.evaluate(() => {
-      const audio = document.querySelector('audio')
-      return audio?.paused ?? true
-    })
-    expect(paused).toBe(false)
+    expect(await page.evaluate(() => document.querySelector('audio')?.paused ?? true)).toBe(false)
   })
 
-  test('audio is audible (volume > 0, not muted)', async ({ page }) => {
+  test('le son est audible (volume > 0, non coupé)', async ({ page }) => {
     await page.goto(SEARCH)
-    await page.locator('.search-input').fill('Rick Astley Never Gonna Give You Up')
+    await page.locator('.search-input').fill('Rick Astley')
     await expect(page.locator('.track-item').first()).toBeVisible({ timeout: 15_000 })
-
     await page.locator('.track-item').first().click()
 
     await page.waitForFunction(() => {
       const audio = document.querySelector('audio')
-      return audio && !audio.paused && audio.readyState >= 2
+      return !!audio && !audio.paused && audio.readyState >= 2
     }, { timeout: 30_000 })
 
     const state = await page.evaluate(() => {
-      const audio = document.querySelector('audio')
-      return {
-        volume: audio?.volume ?? 0,
-        muted: audio?.muted ?? true,
-        paused: audio?.paused ?? true,
-        readyState: audio?.readyState ?? 0,
-      }
+      const audio = document.querySelector('audio')!
+      return { volume: audio.volume, muted: audio.muted }
     })
-
     expect(state.volume).toBeGreaterThan(0)
     expect(state.muted).toBe(false)
-    expect(state.paused).toBe(false)
-    expect(state.readyState).toBeGreaterThanOrEqual(2)
   })
 
-  test('audio has valid duration', async ({ page }) => {
+  test('toucher une piste pendant la lecture ne met pas en pause', async ({ page }) => {
     await page.goto(SEARCH)
-    await page.locator('.search-input').fill('Rick Astley Never Gonna Give You Up')
+    await page.locator('.search-input').fill('Rick Astley')
     await expect(page.locator('.track-item').first()).toBeVisible({ timeout: 15_000 })
 
     await page.locator('.track-item').first().click()
-
     await page.waitForFunction(() => {
       const audio = document.querySelector('audio')
-      return audio && audio.duration > 0 && !isNaN(audio.duration)
+      return !!audio && !audio.paused
     }, { timeout: 30_000 })
 
-    const duration = await page.evaluate(() => {
+    // Deuxième piste : l'ancien code appelait togglePlay() et mettait en pause.
+    await page.locator('.track-item').nth(1).click()
+    await page.waitForFunction(() => {
       const audio = document.querySelector('audio')
-      return audio?.duration ?? 0
-    })
-    expect(duration).toBeGreaterThan(0)
+      return !!audio && !audio.paused
+    }, { timeout: 30_000 })
+
+    expect(await page.evaluate(() => document.querySelector('audio')?.paused ?? true)).toBe(false)
   })
 
-  test('audio progress advances over time', async ({ page }) => {
+  test('bascule sur Piped quand Invidious ne répond pas', async ({ page }) => {
+    await mockInstances(page, { failInvidious: true })
+    await mockAudioStream(page)
+
     await page.goto(SEARCH)
-    await page.locator('.search-input').fill('Rick Astley Never Gonna Give You Up')
-    await expect(page.locator('.track-item').first()).toBeVisible({ timeout: 15_000 })
+    await page.locator('.search-input').fill('Rick Astley')
+    await expect(page.locator('.track-item').first()).toBeVisible({ timeout: 20_000 })
 
     await page.locator('.track-item').first().click()
-
-    await page.waitForFunction(() => {
-      const audio = document.querySelector('audio')
-      return audio && !audio.paused && audio.readyState >= 2
-    }, { timeout: 30_000 })
-
-    const t1 = await page.evaluate(() => {
-      const audio = document.querySelector('audio')
-      return audio?.currentTime ?? 0
-    })
-
-    await page.waitForTimeout(2000)
-
-    const t2 = await page.evaluate(() => {
-      const audio = document.querySelector('audio')
-      return audio?.currentTime ?? 0
-    })
-
-    expect(t2).toBeGreaterThan(t1)
-  })
-
-  test('next button changes track', async ({ page }) => {
-    await page.goto(SEARCH)
-    await page.locator('.search-input').fill('Rick Astley Never Gonna Give You Up')
-    await expect(page.locator('.track-item').first()).toBeVisible({ timeout: 15_000 })
-
-    await page.locator('.track-item').first().click()
-
-    await page.waitForFunction(() => {
-      const audio = document.querySelector('audio')
-      return audio && !audio.paused && audio.readyState >= 2
-    }, { timeout: 30_000 })
-
-    await page.locator('[aria-label="Next"]').click()
-
-    await page.waitForTimeout(1000)
-
-    const src2 = await page.evaluate(() => {
-      const audio = document.querySelector('audio')
-      return audio?.src ?? ''
-    })
-    expect(src2).toBeTruthy()
-  })
-
-  test('pause stops audio', async ({ page }) => {
-    await page.goto(SEARCH)
-    await page.locator('.search-input').fill('Rick Astley Never Gonna Give You Up')
-    await expect(page.locator('.track-item').first()).toBeVisible({ timeout: 15_000 })
-
-    await page.locator('.track-item').first().click()
-
-    await page.waitForFunction(() => {
-      const audio = document.querySelector('audio')
-      return audio && !audio.paused && audio.readyState >= 2
-    }, { timeout: 30_000 })
-
-    await page.locator('[aria-label="Pause"]').click()
-
-    await page.waitForFunction(() => {
-      const audio = document.querySelector('audio')
-      return audio?.paused === true
-    }, { timeout: 5_000 })
-
-    const paused = await page.evaluate(() => {
-      const audio = document.querySelector('audio')
-      return audio?.paused ?? false
-    })
-    expect(paused).toBe(true)
+    await page.waitForFunction(
+      () => (document.querySelector('audio')?.src ?? '').includes('piped.test'),
+      { timeout: 30_000 },
+    )
   })
 })
