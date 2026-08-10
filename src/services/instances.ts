@@ -15,6 +15,9 @@ const INSTANCES_API = 'https://api.invidious.io/instances.json'
 const STORAGE_KEY = 'yt-instances'
 const REFRESH_INTERVAL = 30 * 60 * 1000 // 30 minutes
 const REQUEST_TIMEOUT = 6000
+
+/** Délai laissé à une instance pour prouver qu'elle répond (diagnostic inclus). */
+export const audioProbeTimeout = 8000
 const DEFAULT_SCORE = 50
 
 export type InstanceKind = 'invidious' | 'piped'
@@ -392,15 +395,19 @@ export async function fetchFromInstances(
   }
 
   const attempts = Math.min(options.maxAttempts ?? candidates.length, candidates.length)
-  let lastError: Error | null = null
+
+  // On retient l'échec de chaque instance : un message ne citant que la
+  // dernière ne dit pas si le problème vient d'une instance ou de toutes.
+  const failures: string[] = []
 
   for (let i = 0; i < attempts; i++) {
     const instance = candidates[i]
+    const host = instance.origin.replace(/^https?:\/\//, '')
     try {
       const res = await fetch(`${instance.apiUrl}${path}`, options.request)
       if (!res.ok) {
         penalizeInstance(instance.origin)
-        lastError = new Error(`HTTP ${res.status} (${instance.origin})`)
+        failures.push(`${host} HTTP ${res.status}`)
         continue
       }
 
@@ -409,7 +416,7 @@ export async function fetchFromInstances(
         // L'instance répond mais ne peut pas servir cette ressource (playlist
         // privée, vidéo bloquée). Pénalité courte : la faute n'est pas la sienne.
         penalizeInstance(instance.origin, 10_000)
-        lastError = new Error(String(data.error))
+        failures.push(`${host} : ${String(data.error)}`)
         continue
       }
 
@@ -417,9 +424,22 @@ export async function fetchFromInstances(
       return { data, instance }
     } catch (err) {
       penalizeInstance(instance.origin)
-      lastError = err instanceof Error ? err : new Error(String(err))
+      // « Load failed » / « Failed to fetch » : le navigateur a refusé la
+      // réponse, presque toujours faute d'en-tête CORS sur l'instance.
+      const reason = err instanceof Error ? err.message : String(err)
+      failures.push(`${host} : ${reason}`)
     }
   }
 
-  throw lastError ?? new Error(`Toutes les instances ${kind} ont échoué`)
+  throw new Error(
+    `${attempts} instance${attempts > 1 ? 's' : ''} ${kind} sans réponse exploitable — ${summarize(failures)}`,
+  )
+}
+
+/** Limite la longueur du message tout en gardant les premières causes. */
+function summarize(failures: string[], max = 3): string {
+  if (failures.length === 0) return 'cause inconnue'
+  const shown = failures.slice(0, max).join(' ; ')
+  const rest = failures.length - max
+  return rest > 0 ? `${shown} ; et ${rest} autre${rest > 1 ? 's' : ''}` : shown
 }

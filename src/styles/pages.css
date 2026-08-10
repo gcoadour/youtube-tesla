@@ -630,3 +630,33 @@
   .theme-option:hover { border-color: var(--text-secondary); }
   .theme-option.selected:hover { border-color: var(--accent); }
 }
+
+/* Diagnostic des instances -------------------------------------------------- */
+
+.diagnostic-block {
+  margin-bottom: 20px;
+  padding: 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.probe {
+  flex-shrink: 0;
+  font-size: 13px;
+  white-space: nowrap;
+  padding: 4px 10px;
+  border-radius: 12px;
+  background: var(--bg-pressed);
+  color: var(--text-secondary);
+}
+
+.probe.up { color: var(--accent-text); }
+.probe.down { color: var(--danger); }
+
+@media (max-width: 767px) {
+  /* Sur téléphone la ligne ne tient pas : origine sur une ligne, verdicts en
+     dessous, plutôt qu'une troncature qui masquerait justement le résultat. */
+  .instance-item { flex-wrap: wrap; padding: 12px 14px; }
+  .instance-origin { flex: 1 1 100%; order: -1; }
+  .diagnostic-block { padding: 12px; }
+}

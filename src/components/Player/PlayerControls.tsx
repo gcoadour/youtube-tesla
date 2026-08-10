@@ -39,7 +39,7 @@ export default function PlayerControls({ size = 'bar' }: Props) {
       </button>
 
       <button
-        className="control-btn"
+        className="control-btn control-prev"
         onClick={previous}
         disabled={!currentTrack}
         aria-label="Piste précédente"
@@ -63,7 +63,7 @@ export default function PlayerControls({ size = 'bar' }: Props) {
       </button>
 
       <button
-        className="control-btn"
+        className="control-btn control-next"
         onClick={() => next()}
         disabled={!currentTrack}
         aria-label="Piste suivante"

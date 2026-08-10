@@ -92,7 +92,7 @@ test.describe('Interface Tesla (paysage tactile)', () => {
     await page.locator('.track-item').first().tap()
     await expect(page.locator('.now-playing-bar')).toBeVisible({ timeout: 20_000 })
 
-    await page.locator('.npb-cover-btn').tap()
+    await page.locator('.npb-open').tap()
     await expect(page.locator('.now-playing-view')).toBeVisible()
     expect(await undersizedTargets(page, '.now-playing-view')).toEqual([])
 

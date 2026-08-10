@@ -93,18 +93,26 @@ test.describe('Lecture audio', () => {
     expect(await page.evaluate(() => document.querySelector('audio')?.paused ?? true)).toBe(false)
   })
 
-  test('bascule sur Piped quand Invidious ne répond pas', async ({ page }) => {
+  test("l'API Invidious en panne n'empêche pas la lecture", async ({ page }) => {
+    // Toutes les réponses JSON d'Invidious échouent ; seul le flux répond.
     await mockInstances(page, { failInvidious: true })
     await mockAudioStream(page)
 
     await page.goto(SEARCH)
     await page.locator('.search-input').fill('Rick Astley')
+    // La recherche bascule sur Piped, elle a bien besoin de JSON.
     await expect(page.locator('.track-item').first()).toBeVisible({ timeout: 20_000 })
 
     await page.locator('.track-item').first().click()
-    await page.waitForFunction(
-      () => (document.querySelector('audio')?.src ?? '').includes('piped.test'),
-      { timeout: 30_000 },
-    )
+    await page.waitForFunction(() => {
+      const audio = document.querySelector('audio')
+      return !!audio && !audio.paused && audio.readyState >= 2
+    }, { timeout: 30_000 })
+
+    // Le flux est consommé par un élément <audio>, non soumis au CORS : une
+    // instance dont l'API refuse notre origine reste parfaitement écoutable.
+    // C'est précisément ce que l'ancien pré-appel à /api/v1/videos interdisait.
+    const src = await page.evaluate(() => document.querySelector('audio')?.src ?? '')
+    expect(src).toContain('latest_version')
   })
 })

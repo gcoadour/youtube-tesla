@@ -3,7 +3,7 @@
  * ce module ne s'occupe plus que des endpoints.
  */
 
-import { fetchFromInstances } from './instances'
+import { fetchFromInstances, getAvailableInstances, checkInstances } from './instances'
 import type { Track } from '../types'
 
 /** Nombre de vidéos renvoyées par page par l'API playlists d'Invidious. */
@@ -174,33 +174,41 @@ export async function getChannelPlaylistIds(
   return ids
 }
 
+/** Construit l'URL de flux relayé d'une instance donnée. */
+export function audioUrlFor(origin: string, videoId: string): string {
+  return `${origin}/latest_version?id=${encodeURIComponent(videoId)}&itag=140&local=true`
+}
+
 /**
  * URL du flux audio relayée par l'instance (`local=true`).
  *
- * C'est le point clé de la lecture en production : l'URL googlevideo brute
- * renvoyée par `adaptiveFormats` n'a aucun en-tête CORS, donc ni <audio> fiable
- * ni fetch() possible depuis GitHub Pages. `latest_version` fait relayer le flux
- * par l'instance, qui répond avec CORS et gère les requêtes Range.
+ * L'URL googlevideo brute renvoyée par `adaptiveFormats` n'a aucun en-tête
+ * CORS. `latest_version` fait relayer le flux par l'instance, qui gère les
+ * requêtes Range. itag 140 = AAC 128 kb/s, le format le plus répandu.
  *
- * itag 140 = AAC 128 kb/s, le format audio le plus universellement présent.
+ * **Aucun appel d'API n'est fait ici, volontairement.** La version précédente
+ * interrogeait d'abord `/api/v1/videos/{id}` pour vérifier que la vidéo était
+ * lisible. Or cet appel est du JSON soumis au CORS, alors que le flux lui-même
+ * est consommé par un élément <audio>, qui n'y est pas soumis. Une instance
+ * dont l'API refuse notre origine était donc déclarée injouable (« Load
+ * failed ») alors qu'elle aurait parfaitement diffusé le son. La validité de
+ * l'URL est désormais tranchée par l'élément <audio>, qui bascule sur
+ * l'instance suivante en cas d'échec.
  *
- * `exclude` porte les origines dont le flux a déjà échoué pour cette piste :
- * l'appelant peut ainsi parcourir les instances une à une.
+ * `exclude` porte les origines déjà tentées sans succès pour cette piste.
  */
 export async function getAudioStreamUrl(
   videoId: string,
   exclude: Iterable<string> = [],
 ): Promise<{ url: string; origin: string }> {
-  // On vérifie que la vidéo est lisible avant de renvoyer une URL de flux :
-  // cela évite de coller au <audio> une URL qui répondra 403.
-  const { instance } = await fetchFromInstances(
-    'invidious',
-    `/videos/${encodeURIComponent(videoId)}`,
-    { exclude },
-  )
+  await checkInstances()
 
-  return {
-    url: `${instance.origin}/latest_version?id=${encodeURIComponent(videoId)}&itag=140&local=true`,
-    origin: instance.origin,
+  const excluded = new Set(exclude)
+  const instance = getAvailableInstances('invidious').find((i) => !excluded.has(i.origin))
+
+  if (!instance) {
+    throw new Error('plus aucune instance Invidious à essayer')
   }
+
+  return { url: audioUrlFor(instance.origin, videoId), origin: instance.origin }
 }

@@ -29,14 +29,18 @@ export default function NowPlayingBar({ onExpand }: Props) {
       <div className="npb-progress-track" />
 
       <div className="npb-left">
-        <button className="npb-cover-btn" onClick={onExpand} aria-label="Afficher le lecteur en plein écran">
-          <img className="npb-cover" src={currentTrack.thumbnail} alt="" />
-          <span className="npb-cover-expand"><ExpandIcon size={16} /></span>
+        {/* Pochette et titre forment une seule cible : sur téléphone, viser une
+            vignette de 52 px du bout du pouce n'est pas réaliste. */}
+        <button className="npb-open" onClick={onExpand} aria-label="Afficher le lecteur en plein écran">
+          <span className="npb-cover-wrap">
+            <img className="npb-cover" src={currentTrack.thumbnail} alt="" />
+            <span className="npb-cover-expand"><ExpandIcon size={16} /></span>
+          </span>
+          <span className="npb-info">
+            <span className="npb-title">{currentTrack.title}</span>
+            <span className="npb-artist">{currentTrack.artist}</span>
+          </span>
         </button>
-        <div className="npb-info">
-          <div className="npb-title">{currentTrack.title}</div>
-          <div className="npb-artist">{currentTrack.artist}</div>
-        </div>
         <button
           className={`npb-like ${isLiked ? 'liked' : ''}`}
           onClick={() => toggleLikeTrack(currentTrack.id)}

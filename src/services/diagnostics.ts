@@ -1,0 +1,159 @@
+/**
+ * Diagnostic des instances.
+ *
+ * Quand plus rien ne joue, la question utile n'est pas « quelle erreur ? » mais
+ * « quelle instance peut encore diffuser du son ? ». Ce module répond aux deux,
+ * séparément, parce que les deux capacités sont indépendantes :
+ *
+ *  - l'**API** est du JSON lu par fetch(), donc soumise au CORS. Elle sert la
+ *    recherche et l'import ;
+ *  - le **flux** est consommé par un élément <audio>, qui n'est pas soumis au
+ *    CORS. Une instance peut parfaitement diffuser du son alors que son API
+ *    nous refuse : c'est même le cas le plus fréquent aujourd'hui.
+ */
+
+import { getInstances, audioProbeTimeout } from './instances'
+import type { Instance } from './instances'
+import { audioUrlFor } from './invidious'
+
+/** Vidéo de référence, publique et stable, utilisée comme témoin. */
+const PROBE_VIDEO_ID = 'dQw4w9WgXcQ'
+
+export type ProbeResult = 'ok' | 'ko'
+
+export interface InstanceDiagnostic {
+  origin: string
+  kind: Instance['kind']
+  api: ProbeResult
+  stream: ProbeResult
+  detail: string
+}
+
+/**
+ * Teste si une URL audio est réellement lisible.
+ * Passe par un élément <audio> et non par fetch() : c'est le chemin qu'emprunte
+ * la lecture, et il ne dépend pas du CORS.
+ */
+function canPlay(url: string, timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const audio = new Audio()
+    audio.preload = 'metadata'
+    audio.muted = true
+
+    let settled = false
+    const finish = (ok: boolean) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      audio.removeAttribute('src')
+      audio.load()
+      resolve(ok)
+    }
+
+    const timer = setTimeout(() => finish(false), timeoutMs)
+    audio.addEventListener('loadedmetadata', () => finish(true), { once: true })
+    audio.addEventListener('canplay', () => finish(true), { once: true })
+    audio.addEventListener('error', () => finish(false), { once: true })
+
+    audio.src = url
+  })
+}
+
+async function probeApi(instance: Instance): Promise<{ ok: boolean; detail: string }> {
+  const path =
+    instance.kind === 'invidious'
+      ? `/videos/${PROBE_VIDEO_ID}`
+      : `/streams/${PROBE_VIDEO_ID}`
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), audioProbeTimeout)
+  try {
+    const res = await fetch(`${instance.apiUrl}${path}`, { signal: controller.signal })
+    if (!res.ok) return { ok: false, detail: `API HTTP ${res.status}` }
+    const data = await res.json()
+    if (data?.error) return { ok: false, detail: `API : ${String(data.error)}` }
+    return { ok: true, detail: '' }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    // « Load failed » (WebKit) et « Failed to fetch » (Chromium) traduisent le
+    // même refus : la réponse n'a pas d'en-tête CORS pour notre origine.
+    const isCors = /load failed|failed to fetch|networkerror/i.test(message)
+    return { ok: false, detail: isCors ? 'API bloquée (CORS)' : `API : ${message}` }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function probeStream(
+  instance: Instance,
+  apiData: { ok: boolean },
+): Promise<{ ok: boolean; detail: string }> {
+  if (instance.kind === 'invidious') {
+    const ok = await canPlay(audioUrlFor(instance.origin, PROBE_VIDEO_ID), audioProbeTimeout)
+    return { ok, detail: ok ? '' : 'flux injoignable' }
+  }
+
+  // Piped ne publie l'URL de son flux que via son API : si l'API est muette,
+  // le flux est hors de portée, sans que cela dise quoi que ce soit du relais.
+  if (!apiData.ok) return { ok: false, detail: 'flux non testable sans son API' }
+
+  try {
+    const res = await fetch(`${instance.apiUrl}/streams/${PROBE_VIDEO_ID}`)
+    const data = await res.json()
+    const stream = (data?.audioStreams || [])
+      .filter((s: any) => s.url)
+      .sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0))[0]
+    if (!stream) return { ok: false, detail: 'aucun flux audio proposé' }
+    const ok = await canPlay(stream.url, audioProbeTimeout)
+    return { ok, detail: ok ? '' : 'flux injoignable' }
+  } catch {
+    return { ok: false, detail: 'flux injoignable' }
+  }
+}
+
+async function diagnoseOne(instance: Instance): Promise<InstanceDiagnostic> {
+  const api = await probeApi(instance)
+  const stream = await probeStream(instance, api)
+
+  const notes = [api.detail, stream.detail].filter(Boolean)
+  return {
+    origin: instance.origin,
+    kind: instance.kind,
+    api: api.ok ? 'ok' : 'ko',
+    stream: stream.ok ? 'ok' : 'ko',
+    detail: stream.ok && api.ok ? 'tout fonctionne' : notes.join(' — ') || 'échec',
+  }
+}
+
+/**
+ * Teste toutes les instances, trois à la fois.
+ * Les résultats arrivent au fil de l'eau via `onResult` : sur une dizaine
+ * d'instances lentes, attendre la fin pour afficher quoi que ce soit donnerait
+ * l'impression d'une application figée.
+ */
+export async function diagnoseInstances(
+  onResult: (result: InstanceDiagnostic) => void,
+  concurrency = 3,
+): Promise<void> {
+  const queue = getInstances()
+  let cursor = 0
+
+  const worker = async () => {
+    while (cursor < queue.length) {
+      const instance = queue[cursor++]
+      try {
+        onResult(await diagnoseOne(instance))
+      } catch {
+        onResult({
+          origin: instance.origin,
+          kind: instance.kind,
+          api: 'ko',
+          stream: 'ko',
+          detail: 'échec inattendu',
+        })
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, worker))
+}

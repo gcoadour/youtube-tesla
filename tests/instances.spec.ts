@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { BASE, mockInstances, mockAudioStream } from './helpers'
+import { BASE, mockInstances, mockAudioStream, silentWav } from './helpers'
 
 /**
  * Couvre les deux garanties du socle réseau :
@@ -110,5 +110,32 @@ test.describe('Annuaire et rotation des instances', () => {
 
     await expect(page.locator('.instance-item').first()).toBeVisible({ timeout: 15_000 })
     expect(await page.locator('.instance-origin').count()).toBe(before)
+  })
+})
+
+test.describe('Diagnostic des instances', () => {
+  test.beforeEach(async ({ page }) => {
+    await mockInstances(page)
+  })
+
+  test("distingue une API bloquée d'un flux injouable", async ({ page }) => {
+    // inv-a : API refusée (CORS) mais flux parfaitement lisible — c'est le cas
+    // qui doit rester exploitable, et que l'ancienne résolution condamnait.
+    await page.route('**/inv-a.test/api/v1/videos/**', (route) => route.abort('failed'))
+    await page.route('**/inv-a.test/latest_version**', (route) => route.fulfill(silentWav()))
+
+    // inv-b : API disponible mais flux mort.
+    await page.route('**/inv-b.test/latest_version**', (route) => route.fulfill({ status: 403, body: '' }))
+
+    await page.goto(`${BASE}/settings`)
+    await page.getByRole('button', { name: 'Tester les instances' }).click()
+
+    const rowA = page.locator('.instance-item', { hasText: 'inv-a.test' })
+    await expect(rowA.locator('.probe.down')).toContainText('API', { timeout: 30_000 })
+    await expect(rowA.locator('.probe.up')).toContainText('Flux')
+
+    const rowB = page.locator('.instance-item', { hasText: 'inv-b.test' })
+    await expect(rowB.locator('.probe.up')).toContainText('API', { timeout: 30_000 })
+    await expect(rowB.locator('.probe.down')).toContainText('Flux')
   })
 })

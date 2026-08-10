@@ -123,7 +123,7 @@
 @media (max-width: 767px) {
   :root {
     --rail-width: 0px;
-    --npb-height: 104px;
+    --npb-height: 76px;
     --fs-3xl: 30px;
     --fs-2xl: 24px;
     --fs-xl: 20px;

@@ -4,6 +4,8 @@ import {
   getInstances, checkInstances, addUserInstance, removeUserInstance, prioritizeInstance,
 } from '../services/instances'
 import type { Instance, InstanceKind } from '../services/instances'
+import { diagnoseInstances } from '../services/diagnostics'
+import type { InstanceDiagnostic } from '../services/diagnostics'
 import { getThemePreference, setThemePreference, resolveTheme, watchSystemTheme } from '../services/theme'
 import type { ThemePreference } from '../services/theme'
 import { TrashIcon, ArrowUpIcon, RefreshIcon } from '../components/common/Icons'
@@ -37,6 +39,9 @@ export default function SettingsPage() {
 
   const [instances, setInstances] = useState<Instance[]>([])
   const [checking, setChecking] = useState(false)
+  const [diagnostics, setDiagnostics] = useState<InstanceDiagnostic[]>([])
+  const [diagnosing, setDiagnosing] = useState(false)
+
   const [newOrigin, setNewOrigin] = useState('')
   const [newKind, setNewKind] = useState<InstanceKind>('invidious')
   const [instanceError, setInstanceError] = useState('')
@@ -80,6 +85,16 @@ export default function SettingsPage() {
     await checkInstances(true)
     refreshInstances()
     setChecking(false)
+  }
+
+  const handleDiagnose = async () => {
+    setDiagnosing(true)
+    setDiagnostics([])
+    try {
+      await diagnoseInstances((result) => setDiagnostics((prev) => [...prev, result]))
+    } finally {
+      setDiagnosing(false)
+    }
   }
 
   const handleAddInstance = () => {
@@ -152,11 +167,58 @@ export default function SettingsPage() {
           <button className="btn-secondary" onClick={handleCheckInstances} disabled={checking}>
             {checking ? 'Actualisation…' : 'Actualiser la liste'}
           </button>
+          <button className="btn-secondary" onClick={handleDiagnose} disabled={diagnosing}>
+            {diagnosing ? 'Test en cours…' : 'Tester les instances'}
+          </button>
           <span className="settings-desc" style={{ margin: 0 }}>
             {instances.filter((i) => i.kind === 'invidious').length} Invidious ·{' '}
             {instances.filter((i) => i.kind === 'piped').length} Piped
           </span>
         </div>
+
+        {(diagnosing || diagnostics.length > 0) && (
+          <div className="diagnostic-block">
+            <p className="settings-desc">
+              « API » sert la recherche et l'import ; « Flux » sert la lecture. Les deux sont
+              indépendants : une instance peut très bien diffuser du son alors que son API nous
+              refuse. Priorisez une instance dont le flux répond.
+            </p>
+            <div className="instance-list">
+              {diagnostics.map((d) => (
+                <div key={d.origin} className="instance-item">
+                  <span className="instance-kind">{d.kind}</span>
+                  <span className="instance-origin">{d.origin.replace(/^https:\/\//, '')}</span>
+                  <span className={`probe ${d.api === 'ok' ? 'up' : 'down'}`}>
+                    API {d.api === 'ok' ? '✓' : '✗'}
+                  </span>
+                  <span className={`probe ${d.stream === 'ok' ? 'up' : 'down'}`}>
+                    Flux {d.stream === 'ok' ? '✓' : '✗'}
+                  </span>
+                  <button
+                    className="icon-btn"
+                    onClick={() => { prioritizeInstance(d.origin); refreshInstances() }}
+                    aria-label={`Prioriser ${d.origin}`}
+                    title="Prioriser cette instance"
+                  >
+                    <ArrowUpIcon size={22} />
+                  </button>
+                </div>
+              ))}
+              {diagnosing && (
+                <div className="search-status">
+                  <span className="spinner" />
+                  <span>{diagnostics.length} / {instances.length} instances testées…</span>
+                </div>
+              )}
+            </div>
+            {!diagnosing && diagnostics.length > 0 && diagnostics.every((d) => d.stream === 'ko') && (
+              <p className="error-text">
+                Aucune instance ne diffuse de son actuellement. Actualisez la liste, puis
+                réessayez ; si le problème persiste, ajoutez une instance connue ci-dessous.
+              </p>
+            )}
+          </div>
+        )}
 
         <div className="instance-list">
           {instances.map((inst) => (

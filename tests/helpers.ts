@@ -110,7 +110,7 @@ export async function mockAudioStream(page: Page) {
 }
 
 /** WAV PCM d'une seconde, silencieux : suffisant pour readyState et play(). */
-function silentWav() {
+export function silentWav() {
   const sampleRate = 8000
   const samples = sampleRate
   const dataSize = samples * 2

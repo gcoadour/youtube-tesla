@@ -35,11 +35,26 @@
   min-width: 0;
 }
 
-/* La pochette est la cible d'ouverture du plein écran : elle doit se voir
-   comme un bouton, pas comme une image décorative. */
-.npb-cover-btn {
+/* Pochette + titre : une seule cible d'ouverture du plein écran, dimensionnée
+   pour le pouce plutôt que pour un curseur. */
+.npb-open {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border-radius: var(--radius);
+  text-align: left;
+  transition: background var(--transition);
+}
+
+.npb-open:active { background: var(--bg-highlight); }
+
+.npb-cover-wrap {
   position: relative;
   flex-shrink: 0;
+  display: block;
   border-radius: var(--radius);
   overflow: hidden;
   width: 96px;
@@ -67,7 +82,13 @@
   pointer-events: none;
 }
 
-.npb-info { min-width: 0; flex: 1; }
+.npb-info {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
 
 .npb-title {
   font-size: var(--fs-body);
@@ -415,29 +436,52 @@
   .npv-main { flex: none; width: 100%; align-items: stretch; }
 }
 
-/* Barre de lecture compacte sur petit écran. */
+/* Barre de lecture sur téléphone.
+ *
+ * En 390 px de large, pochette + titre + cinq contrôles + barre de progression
+ * + volume ne tiennent pas : les éléments se chevauchaient et le bouton de
+ * lecture débordait sur la liste des titres. La barre se réduit donc à
+ * l'essentiel — pochette, titre, lecture, suivant — et tout le reste vit dans
+ * la vue plein écran, ouverte en touchant la pochette.
+ */
 @media (max-width: 767px) {
-  .now-playing-bar { padding: 0 10px; gap: 10px; }
-  .npb-left { width: auto; gap: 10px; }
-  .npb-cover-btn { width: 60px; height: 60px; }
+  .now-playing-bar { padding: 0 10px; gap: 8px; }
+
+  .npb-left { width: auto; flex: 1; gap: 10px; min-width: 0; }
+  .npb-open { gap: 12px; }
+  .npb-cover-wrap { width: 52px; height: 52px; }
   .npb-cover-expand { display: none; }
-  .npb-info { max-width: 120px; }
+  .npb-info { max-width: none; }
   .npb-title { font-size: var(--fs-sm); }
   .npb-artist { font-size: var(--fs-label); }
   .npb-like { display: none; }
-  .npb-center { max-width: none; gap: 4px; }
-  .npb-right { width: auto; }
-  .volume-slider { display: none; }
-  .player-controls { gap: 4px; }
-  .control-btn { width: 48px; height: 48px; }
-  .play-btn { width: 60px; height: 60px; }
-  /* Aléatoire et répétition sortent de la barre : ils restent accessibles
-     dans la vue plein écran. */
+
+  .npb-center { flex: none; max-width: none; gap: 0; }
+
+  /* La progression reste lisible par le liseré en haut de la barre ; les
+     compteurs et le curseur sont dans la vue plein écran. */
+  .now-playing-bar .progress-bar-container { display: none; }
+
+  /* Aléatoire, répétition et précédent sortent de la barre : le pouce n'a pas
+     la précision pour six cibles alignées sur 390 px. */
   .now-playing-bar .control-shuffle,
-  .now-playing-bar .control-repeat { display: none; }
-  .progress-bar { height: 44px; }
+  .now-playing-bar .control-repeat,
+  .now-playing-bar .control-prev { display: none; }
+
+  /* Volume : les touches matérielles du téléphone font le travail. */
+  .npb-right { display: none; }
+
+  .player-controls { gap: 2px; }
+  .control-btn { width: 48px; height: 48px; }
+  .play-btn { width: 52px; height: 52px; }
+
+  .progress-bar { height: 48px; }
   .progress-track { height: 8px; }
-  .progress-thumb { width: 20px; height: 20px; margin-left: -10px; }
-  .progress-time { font-size: 13px; min-width: 42px; }
-  .npv-controls .play-btn { width: 80px; height: 80px; }
+  .progress-thumb { width: 22px; height: 22px; margin-left: -11px; }
+  .progress-time { font-size: var(--fs-label); min-width: 46px; }
+
+  .npv-controls { gap: 12px; }
+  .npv-controls .control-btn { width: 56px; height: 56px; }
+  .npv-controls .play-btn { width: 76px; height: 76px; }
+  .npv-header { padding: 12px 16px; }
 }
