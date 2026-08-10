@@ -76,15 +76,20 @@ export async function searchTracks(query: string): Promise<YouTubeSearchResult[]
 
   try {
     const items = await invidious.searchVideos(query)
-    const results = items
-      .filter(isMusicContent)
-      .map((item) => ({
-        videoId: item.videoId,
-        title: item.title,
-        artist: item.author,
-        thumbnail: `https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg`,
-        duration: item.lengthSeconds || 0,
-      }))
+
+    // L'heuristique musicale affine, elle ne doit pas censurer : si elle rejette
+    // tout, mieux vaut montrer les résultats bruts qu'un écran vide qui laisse
+    // croire à une panne.
+    const musical = items.filter(isMusicContent)
+    const kept = musical.length > 0 ? musical : items
+
+    const results = kept.map((item) => ({
+      videoId: item.videoId,
+      title: item.title,
+      artist: item.author,
+      thumbnail: `https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg`,
+      duration: item.lengthSeconds || 0,
+    }))
     if (results.length > 0) return results
   } catch (err) {
     errors.push(errorMessage(err))

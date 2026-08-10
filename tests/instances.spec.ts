@@ -13,21 +13,45 @@ test.describe('Annuaire et rotation des instances', () => {
     await mockAudioStream(page)
   })
 
-  test("la liste provient de l'annuaire, filtrée sur https + api + cors", async ({ page }) => {
+  test("la liste provient de l'annuaire, sans les protocoles injoignables", async ({ page }) => {
     await page.goto(`${BASE}/settings`)
     await expect(page.locator('.instance-item').first()).toBeVisible({ timeout: 15_000 })
 
     const origins = await page.locator('.instance-origin').allTextContents()
 
-    // Les trois entrées exploitables de l'annuaire simulé.
     expect(origins).toContain('https://inv-a.test')
     expect(origins).toContain('https://inv-b.test')
     expect(origins).toContain('https://inv-c.test')
 
-    // Onion : injoignable depuis la voiture. Sans CORS : rejetée par le
-    // navigateur à chaque requête. Ni l'une ni l'autre ne doit être retenue.
+    // Onion : injoignable depuis un navigateur ordinaire, donc écartée.
     expect(origins.join(' ')).not.toContain('onion.test')
-    expect(origins.join(' ')).not.toContain('nocors.test')
+
+    // Sans CORS en revanche, l'instance est conservée : son API est inutilisable
+    // mais son flux, lu par <audio>, ne dépend pas du CORS.
+    expect(origins).toContain('https://nocors.test')
+  })
+
+  test("une instance sans CORS n'est jamais interrogée pour un appel d'API", async ({ page }) => {
+    let nocorsQueried = false
+    await page.route('**/nocors.test/**', (route) => {
+      nocorsQueried = true
+      route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
+    })
+
+    // Toutes les instances Invidious CORS échouent : la cascade doit épuiser ce
+    // qu'elle s'autorise puis basculer sur Piped, sans jamais toucher
+    // l'instance sans CORS — qui ne pourrait de toute façon pas répondre.
+    for (const host of ['inv-a', 'inv-b', 'inv-c']) {
+      await page.route(`**/${host}.test/api/v1/search**`, (route) =>
+        route.fulfill({ status: 500, body: '' }),
+      )
+    }
+
+    await page.goto(`${BASE}/search`)
+    await page.locator('.search-input').fill('Rick Astley')
+    await expect(page.locator('.track-item').first()).toBeVisible({ timeout: 25_000 })
+
+    expect(nocorsQueried, "l'instance sans CORS a été interrogée pour rien").toBe(false)
   })
 
   test('une instance en erreur sur la recherche fait passer à la suivante', async ({ page }) => {
@@ -80,7 +104,9 @@ test.describe('Annuaire et rotation des instances', () => {
   })
 
   test('Piped ne prend le relais qu\'après épuisement des instances Invidious', async ({ page }) => {
-    for (const host of ['inv-a', 'inv-b', 'inv-c']) {
+    // nocors.test comprise : sans CORS elle ne sert pas d'API, mais elle reste
+    // une source de flux valable et serait retenue avant Piped.
+    for (const host of ['inv-a', 'inv-b', 'inv-c', 'nocors']) {
       await page.route(`**/${host}.test/latest_version**`, (route) =>
         route.fulfill({ status: 403, body: '' }),
       )
@@ -131,11 +157,14 @@ test.describe('Diagnostic des instances', () => {
     await page.getByRole('button', { name: 'Tester les instances' }).click()
 
     const rowA = page.locator('.instance-item', { hasText: 'inv-a.test' })
-    await expect(rowA.locator('.probe.down')).toContainText('API', { timeout: 30_000 })
-    await expect(rowA.locator('.probe.up')).toContainText('Flux')
+    await expect(rowA.locator('.probe', { hasText: 'API' })).toHaveClass(/down/, { timeout: 30_000 })
+    await expect(rowA.locator('.probe', { hasText: 'Flux' })).toHaveClass(/up/)
 
     const rowB = page.locator('.instance-item', { hasText: 'inv-b.test' })
-    await expect(rowB.locator('.probe.up')).toContainText('API', { timeout: 30_000 })
-    await expect(rowB.locator('.probe.down')).toContainText('Flux')
+    await expect(rowB.locator('.probe', { hasText: 'API' })).toHaveClass(/up/, { timeout: 30_000 })
+    await expect(rowB.locator('.probe', { hasText: 'Flux' })).toHaveClass(/down/)
+
+    // La recherche a son propre verdict : une API saine n'en dit rien.
+    await expect(rowB.locator('.probe', { hasText: 'Recherche' })).toBeVisible()
   })
 })

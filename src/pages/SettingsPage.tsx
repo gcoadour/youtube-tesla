@@ -186,9 +186,10 @@ export default function SettingsPage() {
         {(diagnosing || diagnostics.length > 0) && (
           <div className="diagnostic-block">
             <p className="settings-desc">
-              « API » sert la recherche et l'import ; « Flux » sert la lecture. Les deux sont
-              indépendants : une instance peut très bien diffuser du son alors que son API nous
-              refuse. Priorisez une instance dont le flux répond.
+              Les trois capacités sont indépendantes. « API » sert l'import, « Recherche » a son
+              propre endpoint — souvent désactivé ou limité alors que le reste de l'API répond —
+              et « Flux » sert la lecture, qui n'est pas soumise au CORS. Priorisez une instance
+              dont la colonne qui vous manque répond.
             </p>
             <div className="instance-list">
               {diagnostics.map((d) => (
@@ -197,6 +198,9 @@ export default function SettingsPage() {
                   <span className="instance-origin">{d.origin.replace(/^https:\/\//, '')}</span>
                   <span className={`probe ${d.api === 'ok' ? 'up' : 'down'}`}>
                     API {d.api === 'ok' ? '✓' : '✗'}
+                  </span>
+                  <span className={`probe ${d.search === 'ok' ? 'up' : 'down'}`}>
+                    Recherche {d.search === 'ok' ? '✓' : '✗'}
                   </span>
                   <span className={`probe ${d.stream === 'ok' ? 'up' : 'down'}`}>
                     Flux {d.stream === 'ok' ? '✓' : '✗'}
@@ -222,6 +226,12 @@ export default function SettingsPage() {
               <p className="error-text">
                 Aucune instance ne diffuse de son actuellement. Actualisez la liste, puis
                 réessayez ; si le problème persiste, ajoutez une instance connue ci-dessous.
+              </p>
+            )}
+            {!diagnosing && diagnostics.length > 0 && diagnostics.every((d) => d.search === 'ko') && (
+              <p className="error-text">
+                Aucune instance ne répond à la recherche. La lecture et l'import de playlist
+                peuvent tout de même fonctionner.
               </p>
             )}
           </div>

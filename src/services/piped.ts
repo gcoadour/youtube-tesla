@@ -33,6 +33,8 @@ export async function searchMusic(query: string): Promise<Track[]> {
   const { data } = await fetchFromInstances(
     'piped',
     `/search?q=${encodeURIComponent(query)}&filter=music_songs`,
+    // Même raison que côté Invidious : un 200 vide ne doit pas clore la cascade.
+    { accept: (d) => Array.isArray(d?.items) && d.items.length > 0 },
   )
   const items: any[] = data?.items || []
   return items.map(toTrack).filter((t): t is Track => t !== null)

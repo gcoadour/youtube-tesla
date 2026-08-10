@@ -19,12 +19,16 @@ import { audioUrlFor } from './invidious'
 /** Vidéo de référence, publique et stable, utilisée comme témoin. */
 const PROBE_VIDEO_ID = 'dQw4w9WgXcQ'
 
+/** Requête témoin : assez banale pour qu'une recherche saine renvoie forcément quelque chose. */
+const PROBE_QUERY = 'music'
+
 export type ProbeResult = 'ok' | 'ko'
 
 export interface InstanceDiagnostic {
   origin: string
   kind: Instance['kind']
   api: ProbeResult
+  search: ProbeResult
   stream: ProbeResult
   detail: string
 }
@@ -69,29 +73,60 @@ function canPlay(audio: HTMLAudioElement, url: string, timeoutMs: number): Promi
   })
 }
 
-async function probeApi(instance: Instance): Promise<{ ok: boolean; detail: string }> {
-  const path =
-    instance.kind === 'invidious'
-      ? `/videos/${PROBE_VIDEO_ID}`
-      : `/streams/${PROBE_VIDEO_ID}`
-
+async function probeJson(
+  instance: Instance,
+  path: string,
+  label: string,
+  accept: (data: any) => boolean = () => true,
+): Promise<{ ok: boolean; detail: string }> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), audioProbeTimeout)
   try {
     const res = await fetch(`${instance.apiUrl}${path}`, { signal: controller.signal })
-    if (!res.ok) return { ok: false, detail: `API HTTP ${res.status}` }
+    if (!res.ok) return { ok: false, detail: `${label} HTTP ${res.status}` }
     const data = await res.json()
-    if (data?.error) return { ok: false, detail: `API : ${String(data.error)}` }
+    if (data?.error) return { ok: false, detail: `${label} : ${String(data.error)}` }
+    if (!accept(data)) return { ok: false, detail: `${label} : réponse vide` }
     return { ok: true, detail: '' }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     // « Load failed » (WebKit) et « Failed to fetch » (Chromium) traduisent le
     // même refus : la réponse n'a pas d'en-tête CORS pour notre origine.
     const isCors = /load failed|failed to fetch|networkerror/i.test(message)
-    return { ok: false, detail: isCors ? 'API bloquée (CORS)' : `API : ${message}` }
+    return { ok: false, detail: isCors ? `${label} bloquée (CORS)` : `${label} : ${message}` }
   } finally {
     clearTimeout(timer)
   }
+}
+
+function probeApi(instance: Instance) {
+  const path =
+    instance.kind === 'invidious'
+      ? `/videos/${PROBE_VIDEO_ID}`
+      : `/streams/${PROBE_VIDEO_ID}`
+  return probeJson(instance, path, 'API')
+}
+
+/**
+ * Teste l'endpoint de recherche, séparément du reste de l'API.
+ *
+ * Beaucoup d'instances désactivent ou limitent la recherche, coûteuse et très
+ * sollicitée, tout en servant normalement le reste. Un verdict « API ✓ » global
+ * ne disait donc rien de la recherche — d'où des rapports « l'API fonctionne
+ * mais la recherche non » parfaitement cohérents.
+ */
+function probeSearch(instance: Instance) {
+  const path =
+    instance.kind === 'invidious'
+      ? `/search?q=${encodeURIComponent(PROBE_QUERY)}&type=video`
+      : `/search?q=${encodeURIComponent(PROBE_QUERY)}&filter=music_songs`
+
+  const accept = (data: any) =>
+    instance.kind === 'invidious'
+      ? Array.isArray(data) && data.length > 0
+      : Array.isArray(data?.items) && data.items.length > 0
+
+  return probeJson(instance, path, 'Recherche', accept)
 }
 
 async function probeStream(
@@ -144,16 +179,18 @@ export async function diagnoseInstances(
   if (queue.length === 0) return
 
   const apiResults = new Map<string, { ok: boolean; detail: string }>()
+  const searchResults = new Map<string, { ok: boolean; detail: string }>()
   let cursor = 0
 
   const apiWorker = async () => {
     while (cursor < queue.length) {
       const instance = queue[cursor++]
-      try {
-        apiResults.set(instance.origin, await probeApi(instance))
-      } catch {
-        apiResults.set(instance.origin, { ok: false, detail: 'API : échec inattendu' })
-      }
+      const [api, search] = await Promise.all([
+        probeApi(instance).catch(() => ({ ok: false, detail: 'API : échec inattendu' })),
+        probeSearch(instance).catch(() => ({ ok: false, detail: 'Recherche : échec inattendu' })),
+      ])
+      apiResults.set(instance.origin, api)
+      searchResults.set(instance.origin, search)
     }
   }
 
@@ -161,6 +198,7 @@ export async function diagnoseInstances(
 
   for (const instance of queue) {
     const api = apiResults.get(instance.origin) ?? { ok: false, detail: 'API : non testée' }
+    const search = searchResults.get(instance.origin) ?? { ok: false, detail: '' }
     let stream: { ok: boolean; detail: string }
     try {
       stream = await probeStream(probeAudio, instance, api)
@@ -168,13 +206,15 @@ export async function diagnoseInstances(
       stream = { ok: false, detail: 'flux : échec inattendu' }
     }
 
-    const notes = [api.detail, stream.detail].filter(Boolean)
+    const notes = [api.detail, search.detail, stream.detail].filter(Boolean)
+    const allOk = api.ok && search.ok && stream.ok
     onResult({
       origin: instance.origin,
       kind: instance.kind,
       api: api.ok ? 'ok' : 'ko',
+      search: search.ok ? 'ok' : 'ko',
       stream: stream.ok ? 'ok' : 'ko',
-      detail: stream.ok && api.ok ? 'tout fonctionne' : notes.join(' — ') || 'échec',
+      detail: allOk ? 'tout fonctionne' : notes.join(' — ') || 'échec',
     })
   }
 }

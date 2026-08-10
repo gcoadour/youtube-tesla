@@ -30,6 +30,15 @@ export interface Instance {
   apiUrl: string
   score: number
   penalizedUntil: number
+  /**
+   * L'instance annonce `Access-Control-Allow-Origin`.
+   *
+   * Déterminant : un appel JSON depuis le navigateur (recherche, import) est
+   * impossible sans, tandis qu'un flux audio consommé par <audio> n'y est pas
+   * soumis. Une instance sans CORS reste donc utile à la lecture, mais ne doit
+   * jamais être essayée pour une requête d'API — c'est du temps perdu.
+   */
+  cors: boolean
   /** true tant qu'aucune vérification n'a eu lieu */
   unverified: boolean
   /** Ajoutée à la main : jamais retirée par un rafraîchissement */
@@ -61,7 +70,12 @@ function apiUrlFor(kind: InstanceKind, origin: string): string {
   return kind === 'invidious' ? `${origin}/api/v1` : origin
 }
 
-function makeInstance(kind: InstanceKind, origin: string, userAdded = false): Instance {
+function makeInstance(
+  kind: InstanceKind,
+  origin: string,
+  userAdded = false,
+  cors = true,
+): Instance {
   const clean = origin.replace(/\/+$/, '')
   return {
     kind,
@@ -69,6 +83,7 @@ function makeInstance(kind: InstanceKind, origin: string, userAdded = false): In
     apiUrl: apiUrlFor(kind, clean),
     score: DEFAULT_SCORE,
     penalizedUntil: 0,
+    cors,
     unverified: true,
     userAdded,
   }
@@ -83,11 +98,15 @@ function sortInstances(): void {
   instances.sort((a, b) => b.score - a.score)
 }
 
-async function fetchWithTimeout(url: string, ms = REQUEST_TIMEOUT): Promise<Response> {
+async function fetchWithTimeout(
+  url: string,
+  ms = REQUEST_TIMEOUT,
+  init?: RequestInit,
+): Promise<Response> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), ms)
   try {
-    return await fetch(url, { signal: controller.signal })
+    return await fetch(url, { ...init, signal: controller.signal })
   } finally {
     clearTimeout(timer)
   }
@@ -100,6 +119,7 @@ interface StoredInstance {
   origin: string
   score: number
   userAdded: boolean
+  cors?: boolean
 }
 
 function persist(): void {
@@ -109,6 +129,7 @@ function persist(): void {
       origin: i.origin,
       score: i.score,
       userAdded: i.userAdded,
+      cors: i.cors,
     }))
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
   } catch {
@@ -129,7 +150,7 @@ function load(): void {
   for (const s of stored) {
     if (!s?.origin || (s.kind !== 'invidious' && s.kind !== 'piped')) continue
     byOrigin.set(s.origin, {
-      ...makeInstance(s.kind, s.origin, !!s.userAdded),
+      ...makeInstance(s.kind, s.origin, !!s.userAdded, s.cors !== false),
       score: typeof s.score === 'number' ? s.score : DEFAULT_SCORE,
     })
   }
@@ -194,15 +215,14 @@ async function refreshFromApi(): Promise<void> {
   for (const entry of data) {
     const info = Array.isArray(entry) ? entry[1] : null
     if (!info?.uri) continue
-    // Seules les instances HTTPS avec API et CORS sont exploitables ici :
-    // onion/i2p sont injoignables depuis la voiture, et une instance sans CORS
-    // échouerait à chaque requête du navigateur.
+    // onion/i2p sont injoignables depuis la voiture.
     if (info.type !== 'https') continue
     if (info.api === false) continue
-    if (info.cors === false) continue
 
+    // Les instances sans CORS ne sont plus écartées, mais marquées : elles
+    // restent bonnes pour la lecture, et sont exclues des appels d'API.
     discovered.push({
-      ...makeInstance('invidious', info.uri),
+      ...makeInstance('invidious', info.uri, false, info.cors === true),
       score: scoreFromApi(info),
       unverified: false,
     })
@@ -295,13 +315,24 @@ export function getInstances(kind?: InstanceKind): Instance[] {
 
 /**
  * Instances utilisables d'une famille, les mieux classées d'abord.
- * Si toutes sont pénalisées, on les rend quand même : mieux vaut retenter que
- * refuser la requête.
+ *
+ * `corsOnly` restreint aux instances capables de servir un appel JSON depuis le
+ * navigateur. Sans ce filtre, une recherche essaie des instances qui ne peuvent
+ * structurellement pas répondre, et l'attente est pure perte.
+ *
+ * Si toutes les instances retenues sont pénalisées, on les rend quand même :
+ * mieux vaut retenter que refuser la requête.
  */
-export function getAvailableInstances(kind: InstanceKind): Instance[] {
+export function getAvailableInstances(
+  kind: InstanceKind,
+  options: { corsOnly?: boolean } = {},
+): Instance[] {
   const now = Date.now()
-  const usable = instances.filter((i) => i.kind === kind && i.penalizedUntil < now)
-  return usable.length > 0 ? usable : instances.filter((i) => i.kind === kind)
+  const eligible = instances.filter(
+    (i) => i.kind === kind && (!options.corsOnly || i.cors),
+  )
+  const usable = eligible.filter((i) => i.penalizedUntil < now)
+  return usable.length > 0 ? usable : eligible
 }
 
 export function penalizeInstance(origin: string, durationMs = 60_000): void {
@@ -364,12 +395,25 @@ export interface InstanceResponse {
   instance: Instance
 }
 
+/**
+ * Nombre d'instances essayées par défaut pour un appel d'API.
+ *
+ * Une valeur non bornée avait l'air plus robuste, mais l'annuaire renvoie
+ * plusieurs dizaines d'instances : une recherche pouvait toutes les parcourir
+ * en série, ce qui la rendait interminable au lieu d'échouer franchement.
+ */
+const DEFAULT_MAX_ATTEMPTS = 4
+
 export interface FetchOptions {
   /** Origines déjà essayées sans succès, à ne pas retenter. */
   exclude?: Iterable<string>
-  /** Par défaut : toutes les instances disponibles. */
+  /** Nombre d'instances à essayer. Par défaut DEFAULT_MAX_ATTEMPTS. */
   maxAttempts?: number
   request?: RequestInit
+  /** Délai laissé à chaque instance. */
+  timeoutMs?: number
+  /** Rejette une réponse par ailleurs valide, pour passer à l'instance suivante. */
+  accept?: (data: any) => boolean
 }
 
 /**
@@ -388,13 +432,15 @@ export async function fetchFromInstances(
   await checkInstances()
 
   const exclude = new Set(options.exclude ?? [])
-  const candidates = getAvailableInstances(kind).filter((i) => !exclude.has(i.origin))
+  // Tout ce qui passe par ici est du JSON lu par fetch : CORS obligatoire.
+  const candidates = getAvailableInstances(kind, { corsOnly: true })
+    .filter((i) => !exclude.has(i.origin))
 
   if (candidates.length === 0) {
-    throw new Error(`Aucune instance ${kind} disponible`)
+    throw new Error(`aucune instance ${kind} ne permet les appels d'API (CORS)`)
   }
 
-  const attempts = Math.min(options.maxAttempts ?? candidates.length, candidates.length)
+  const attempts = Math.min(options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS, candidates.length)
 
   // On retient l'échec de chaque instance : un message ne citant que la
   // dernière ne dit pas si le problème vient d'une instance ou de toutes.
@@ -404,7 +450,13 @@ export async function fetchFromInstances(
     const instance = candidates[i]
     const host = instance.origin.replace(/^https?:\/\//, '')
     try {
-      const res = await fetch(`${instance.apiUrl}${path}`, options.request)
+      // Sans délai d'attente, une seule instance qui ne répond jamais suffisait
+      // à bloquer toute la cascade.
+      const res = await fetchWithTimeout(
+        `${instance.apiUrl}${path}`,
+        options.timeoutMs ?? REQUEST_TIMEOUT,
+        options.request,
+      )
       if (!res.ok) {
         penalizeInstance(instance.origin)
         failures.push(`${host} HTTP ${res.status}`)
@@ -417,6 +469,14 @@ export async function fetchFromInstances(
         // privée, vidéo bloquée). Pénalité courte : la faute n'est pas la sienne.
         penalizeInstance(instance.origin, 10_000)
         failures.push(`${host} : ${String(data.error)}`)
+        continue
+      }
+
+      // Une réponse 200 syntaxiquement valide mais inexploitable (mauvaise
+      // forme, résultat vide) ne doit pas clore la cascade : l'appelant décide.
+      if (options.accept && !options.accept(data)) {
+        penalizeInstance(instance.origin, 30_000)
+        failures.push(`${host} : réponse inexploitable`)
         continue
       }
 

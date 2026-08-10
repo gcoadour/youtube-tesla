@@ -28,12 +28,27 @@ function toTrack(v: any): Track | null {
   }
 }
 
+/** Ne garde que les vraies vidéos : une recherche peut aussi renvoyer chaînes et playlists. */
+function isSearchVideo(item: any): boolean {
+  return !!item?.videoId && (item.type === undefined || item.type === 'video')
+}
+
 export async function searchVideos(query: string): Promise<InvidiousSearchItem[]> {
   const { data } = await fetchFromInstances(
     'invidious',
     `/search?q=${encodeURIComponent(query)}&type=video`,
+    {
+      /*
+       * Une instance peut répondre 200 avec un corps inutilisable — mauvaise
+       * forme, ou tableau vide parce que son moteur de recherche est désactivé.
+       * La version précédente renvoyait alors [] sans erreur, ce qui arrêtait la
+       * cascade : aucune autre instance n'était essayée et la recherche
+       * paraissait simplement « ne rien trouver ».
+       */
+      accept: (d) => Array.isArray(d) && d.some(isSearchVideo),
+    },
   )
-  return Array.isArray(data) ? data : []
+  return (Array.isArray(data) ? data : []).filter(isSearchVideo)
 }
 
 export interface InvidiousPlaylist {
@@ -204,6 +219,8 @@ export async function getAudioStreamUrl(
   await checkInstances()
 
   const excluded = new Set(exclude)
+  // corsOnly volontairement absent : un flux lu par <audio> n'est pas soumis au
+  // CORS, donc une instance sans en-tête CORS reste parfaitement écoutable.
   const instance = getAvailableInstances('invidious').find((i) => !excluded.has(i.origin))
 
   if (!instance) {
