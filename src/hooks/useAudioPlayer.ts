@@ -3,6 +3,7 @@ import { usePlayerStore } from '../store/playerStore'
 import { getSponsorSegments, getCurrentSegment } from '../services/sponsorblock'
 import { resolveStream } from '../services/player'
 import { getCachedAudio } from '../services/audioCache'
+import { primeOnFirstGesture } from '../services/audioUnlock'
 
 /**
  * Pilote un unique élément <audio> à partir du store.
@@ -36,6 +37,11 @@ export function useAudioPlayer() {
     document.body.appendChild(audio)
     audioRef.current = audio
 
+    // iOS n'autorise un élément média qu'après un geste utilisateur, et cette
+    // autorisation ne survit pas à l'await de résolution d'URL. On la prend donc
+    // au tout premier geste, avant même qu'une piste soit choisie.
+    const stopPriming = primeOnFirstGesture(audio)
+
     const store = usePlayerStore.getState()
     store.registerPlayerSeeker((time: number) => {
       if (Number.isFinite(time)) audio.currentTime = time
@@ -49,6 +55,7 @@ export function useAudioPlayer() {
     })
 
     return () => {
+      stopPriming()
       audio.pause()
       audio.removeAttribute('src')
       audio.load()
@@ -96,7 +103,11 @@ export function useAudioPlayer() {
     const handlePlayRejection = (err: unknown) => {
       if (isStale()) return
       if ((err as { name?: string })?.name === 'NotAllowedError') {
-        usePlayerStore.getState().pause()
+        const state = usePlayerStore.getState()
+        state.pause()
+        // Sans message, l'utilisateur voit juste le bouton repasser en
+        // « lecture » sans explication — le cas typique sur iOS.
+        state.setPlaybackError('Le navigateur a bloqué la lecture automatique. Touchez à nouveau « lecture ».')
       }
     }
 

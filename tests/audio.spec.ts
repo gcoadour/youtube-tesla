@@ -93,6 +93,33 @@ test.describe('Lecture audio', () => {
     expect(await page.evaluate(() => document.querySelector('audio')?.paused ?? true)).toBe(false)
   })
 
+  test("le déverrouillage iOS n'écrase pas la piste lancée par le même geste", async ({ page }) => {
+    await page.goto(SEARCH)
+    await page.locator('.search-input').fill('Rick Astley')
+    await expect(page.locator('.track-item').first()).toBeVisible({ timeout: 15_000 })
+
+    // Le même appui déverrouille l'élément audio (clip silencieux joué pendant
+    // le geste) et sélectionne la piste. Le nettoyage du clip ne doit pas
+    // effacer la source réelle, résolue juste après de façon asynchrone.
+    await page.locator('.track-item').first().click()
+
+    await page.waitForFunction(() => {
+      const audio = document.querySelector('audio')
+      return !!audio && !audio.paused && audio.readyState >= 2
+    }, { timeout: 30_000 })
+
+    const state = await page.evaluate(() => {
+      const audio = document.querySelector('audio')!
+      return { src: audio.src, muted: audio.muted, volume: audio.volume }
+    })
+
+    expect(state.src).not.toContain('data:audio/wav')
+    expect(state.src).toContain('latest_version')
+    // Le clip de déverrouillage ne doit pas laisser l'élément muet derrière lui.
+    expect(state.muted).toBe(false)
+    expect(state.volume).toBeGreaterThan(0)
+  })
+
   test("l'API Invidious en panne n'empêche pas la lecture", async ({ page }) => {
     // Toutes les réponses JSON d'Invidious échouent ; seul le flux répond.
     await mockInstances(page, { failInvidious: true })

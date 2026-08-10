@@ -6,6 +6,7 @@ import {
 import type { Instance, InstanceKind } from '../services/instances'
 import { diagnoseInstances } from '../services/diagnostics'
 import type { InstanceDiagnostic } from '../services/diagnostics'
+import { createPrimedProbe } from '../services/audioUnlock'
 import { getThemePreference, setThemePreference, resolveTheme, watchSystemTheme } from '../services/theme'
 import type { ThemePreference } from '../services/theme'
 import { TrashIcon, ArrowUpIcon, RefreshIcon } from '../components/common/Icons'
@@ -88,12 +89,18 @@ export default function SettingsPage() {
   }
 
   const handleDiagnose = async () => {
+    // Créé et déverrouillé de façon synchrone, dans le geste de clic : sur iOS
+    // c'est la seule fenêtre où un élément média obtient le droit de charger.
+    const probe = createPrimedProbe()
+
     setDiagnosing(true)
     setDiagnostics([])
     try {
-      await diagnoseInstances((result) => setDiagnostics((prev) => [...prev, result]))
+      await diagnoseInstances(probe, (result) => setDiagnostics((prev) => [...prev, result]))
     } finally {
       setDiagnosing(false)
+      probe.removeAttribute('src')
+      probe.load()
     }
   }
 
