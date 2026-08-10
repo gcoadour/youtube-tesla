@@ -1,0 +1,443 @@
+/* Barre de lecture, contrôles, et vue plein écran. */
+
+.now-playing-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: var(--npb-height);
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 24px;
+  z-index: 35;
+}
+
+/* Fine ligne de progression en haut de la barre : lisible d'un coup d'œil,
+   sans avoir à viser la barre elle-même. */
+.npb-progress-track {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 3px;
+  width: var(--npb-progress, 0%);
+  background: var(--accent);
+  transition: width 200ms linear;
+}
+
+.npb-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 28%;
+  min-width: 0;
+}
+
+/* La pochette est la cible d'ouverture du plein écran : elle doit se voir
+   comme un bouton, pas comme une image décorative. */
+.npb-cover-btn {
+  position: relative;
+  flex-shrink: 0;
+  border-radius: var(--radius);
+  overflow: hidden;
+  width: 96px;
+  height: 96px;
+}
+
+.npb-cover {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.npb-cover-expand {
+  position: absolute;
+  inset: auto 6px 6px auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  pointer-events: none;
+}
+
+.npb-info { min-width: 0; flex: 1; }
+
+.npb-title {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.npb-artist {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.npb-like {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--touch-min);
+  height: var(--touch-min);
+  border-radius: 50%;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  transition: color var(--transition);
+}
+
+.npb-like.liked { color: var(--accent); }
+
+.npb-center {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 780px;
+}
+
+.npb-right {
+  width: 28%;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  min-width: 0;
+}
+
+/* Bandeau d'erreur : la panne de lecture doit se voir, l'ancienne version
+   n'écrivait que dans la console. */
+.playback-error {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--npb-height) + 16px);
+  z-index: 36;
+  max-width: min(680px, calc(100vw - 32px));
+  background: var(--bg-highlight);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.6);
+}
+
+.playback-error-close {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+/* Contrôles ---------------------------------------------------------------- */
+
+.player-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.control-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--touch-min);
+  height: var(--touch-min);
+  border-radius: 50%;
+  color: var(--text-secondary);
+  transition: color var(--transition), background var(--transition);
+}
+
+.control-btn:active:not(:disabled) { background: var(--bg-pressed); }
+.control-btn.active { color: var(--accent); }
+
+.play-btn {
+  width: var(--touch-lg);
+  height: var(--touch-lg);
+  background: var(--text-primary);
+  color: #000;
+}
+
+.play-btn:active:not(:disabled) { background: var(--accent); }
+
+@media (hover: hover) and (pointer: fine) {
+  .control-btn:hover:not(:disabled) { color: var(--text-primary); }
+  .control-btn.active:hover { color: var(--accent-hover); }
+  .play-btn:hover:not(:disabled) { color: #000; transform: scale(1.04); }
+  .npb-like:hover { color: var(--text-primary); }
+  .npb-like.liked:hover { color: var(--accent-hover); }
+}
+
+/* Barre de progression ----------------------------------------------------- */
+
+.progress-bar-container {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+}
+
+.progress-time {
+  font-size: var(--fs-label);
+  color: var(--text-subtle);
+  min-width: 52px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* La zone tactile est bien plus haute que la piste visible : viser une barre
+   de 12 px du bout du doigt, dans une voiture, n'est pas réaliste. */
+.progress-bar {
+  position: relative;
+  flex: 1;
+  height: var(--touch-min);
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.progress-track {
+  position: relative;
+  width: 100%;
+  height: 12px;
+  background: var(--bg-pressed);
+  border-radius: 6px;
+  overflow: visible;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--text-primary);
+  border-radius: 6px;
+  transition: width 120ms linear;
+}
+
+.progress-bar.scrubbing .progress-fill,
+.progress-bar:active .progress-fill {
+  background: var(--accent);
+  transition: none;
+}
+
+.progress-thumb {
+  position: absolute;
+  top: 50%;
+  width: 26px;
+  height: 26px;
+  margin-left: -13px;
+  border-radius: 50%;
+  background: var(--text-primary);
+  transform: translateY(-50%);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  transition: left 120ms linear;
+}
+
+.progress-bar.scrubbing .progress-thumb {
+  background: var(--accent);
+  transform: translateY(-50%) scale(1.15);
+  transition: none;
+}
+
+/* Volume ------------------------------------------------------------------- */
+
+.volume-control {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.volume-slider {
+  position: relative;
+  width: 140px;
+  height: var(--touch-min);
+  display: flex;
+  align-items: center;
+}
+
+.volume-track {
+  width: 100%;
+  height: 10px;
+  background: var(--bg-pressed);
+  border-radius: 5px;
+}
+
+.volume-fill {
+  height: 100%;
+  background: var(--text-primary);
+  border-radius: 5px;
+  pointer-events: none;
+}
+
+.volume-range {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+/* Vue plein écran ---------------------------------------------------------- */
+
+.now-playing-view {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: var(--bg-base);
+  display: flex;
+  flex-direction: column;
+  animation: slideUp 220ms ease;
+}
+
+@keyframes slideUp {
+  from { transform: translateY(3%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.npv-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px;
+  flex-shrink: 0;
+}
+
+.npv-label {
+  font-size: var(--fs-label);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--text-secondary);
+}
+
+.npv-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--touch-min);
+  height: var(--touch-min);
+  border-radius: 50%;
+  color: var(--text-secondary);
+}
+
+.npv-icon-btn.liked { color: var(--accent); }
+.npv-icon-btn:active { background: var(--bg-pressed); }
+
+/* Deux colonnes en paysage (le cas Tesla), empilé en portrait. */
+.npv-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  gap: 48px;
+  padding: 0 48px 40px;
+}
+
+.npv-cover {
+  width: min(42vh, 420px);
+  height: min(42vh, 420px);
+  border-radius: var(--radius-lg);
+  object-fit: cover;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.7);
+  flex-shrink: 0;
+}
+
+.npv-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.npv-title {
+  font-size: var(--fs-3xl);
+  font-weight: 700;
+  line-height: 1.15;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.npv-artist {
+  font-size: var(--fs-xl);
+  color: var(--text-secondary);
+  margin-top: 8px;
+}
+
+.npv-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+}
+
+.npv-controls .control-btn {
+  width: var(--touch-lg);
+  height: var(--touch-lg);
+}
+
+.npv-controls .play-btn {
+  width: 96px;
+  height: 96px;
+}
+
+@media (max-width: 900px), (orientation: portrait) {
+  .npv-body {
+    flex-direction: column;
+    justify-content: center;
+    gap: 32px;
+    padding: 0 24px 32px;
+    text-align: center;
+  }
+  .npv-cover { width: min(46vw, 320px); height: min(46vw, 320px); }
+  .npv-main { flex: none; width: 100%; align-items: stretch; }
+}
+
+/* Barre de lecture compacte sur petit écran. */
+@media (max-width: 767px) {
+  .now-playing-bar { padding: 0 10px; gap: 10px; }
+  .npb-left { width: auto; gap: 10px; }
+  .npb-cover-btn { width: 60px; height: 60px; }
+  .npb-cover-expand { display: none; }
+  .npb-info { max-width: 120px; }
+  .npb-title { font-size: var(--fs-sm); }
+  .npb-artist { font-size: var(--fs-label); }
+  .npb-like { display: none; }
+  .npb-center { max-width: none; gap: 4px; }
+  .npb-right { width: auto; }
+  .volume-slider { display: none; }
+  .player-controls { gap: 4px; }
+  .control-btn { width: 48px; height: 48px; }
+  .play-btn { width: 60px; height: 60px; }
+  /* Aléatoire et répétition sortent de la barre : ils restent accessibles
+     dans la vue plein écran. */
+  .now-playing-bar .control-shuffle,
+  .now-playing-bar .control-repeat { display: none; }
+  .progress-bar { height: 44px; }
+  .progress-track { height: 8px; }
+  .progress-thumb { width: 20px; height: 20px; margin-left: -10px; }
+  .progress-time { font-size: 13px; min-width: 42px; }
+  .npv-controls .play-btn { width: 80px; height: 80px; }
+}

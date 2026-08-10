@@ -7,12 +7,18 @@ export default function SearchPage() {
   const [results, setResults] = useState<YouTubeSearchResult[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [searched, setSearched] = useState(false)
 
   return (
     <div className="page search-page">
-      <h1 className="page-title">Search</h1>
-      <SearchBar onResults={setResults} onLoading={setLoading} onError={setError} />
-      <SearchResults results={results} loading={loading} error={error} />
+      <h1 className="page-title">Rechercher</h1>
+      <SearchBar
+        onResults={setResults}
+        onLoading={setLoading}
+        onError={setError}
+        onSearched={setSearched}
+      />
+      <SearchResults results={results} loading={loading} error={error} searched={searched} />
     </div>
   )
 }

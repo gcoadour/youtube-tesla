@@ -1,0 +1,206 @@
+/* Gabarit général : rail fixe à gauche, contenu défilant, barre de lecture en bas. */
+
+.layout {
+  height: 100vh;
+  overflow: hidden;
+}
+
+.main-content {
+  height: 100vh;
+  margin-left: var(--rail-width);
+  padding: 32px;
+  padding-bottom: calc(var(--npb-height) + 32px);
+}
+
+/* Rail de navigation ------------------------------------------------------- */
+
+.rail {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: var(--rail-width);
+  height: 100%;
+  background: var(--bg-rail);
+  padding: 24px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 30;
+}
+
+.rail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 16px;
+  min-height: var(--touch-min);
+}
+
+.rail-logo {
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  padding: 0 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rail-close {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--touch-min);
+  height: var(--touch-min);
+  border-radius: 50%;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.rail-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 64px;
+  padding: 0 16px;
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  transition: background var(--transition), color var(--transition);
+}
+
+.nav-item:active { background: var(--bg-pressed); color: var(--text-primary); }
+.nav-item.active { color: var(--text-primary); background: var(--bg-highlight); }
+
+.nav-item-label { white-space: nowrap; }
+
+.rail-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 16px 8px;
+}
+
+.rail-playlists {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.rail-section-title {
+  font-size: var(--fs-label);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-secondary);
+  padding: 0 16px;
+  margin-bottom: 10px;
+}
+
+.playlist-link {
+  display: flex;
+  align-items: center;
+  min-height: var(--touch-min);
+  padding: 0 16px;
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: background var(--transition), color var(--transition);
+}
+
+.playlist-link:active { background: var(--bg-pressed); color: var(--text-primary); }
+.playlist-link.active { color: var(--text-primary); background: var(--bg-highlight); }
+
+.rail-footer {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  margin-top: auto;
+}
+
+/* Bouton menu et voile, actifs seulement quand le rail devient un tiroir. */
+
+.rail-toggle {
+  display: none;
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 40;
+  width: var(--touch-min);
+  height: var(--touch-min);
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  align-items: center;
+  justify-content: center;
+  color: var(--text-primary);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+}
+
+.rail-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: var(--bg-overlay);
+  z-index: 29;
+  opacity: 0;
+  transition: opacity var(--transition);
+  pointer-events: none;
+}
+
+.rail-open .rail-backdrop {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .nav-item:hover { color: var(--text-primary); }
+  .playlist-link:hover { color: var(--text-primary); }
+}
+
+/* Rail réduit : icônes seules, libellés et playlists masqués. */
+@media (max-width: 1279px) and (min-width: 768px) {
+  .rail { padding: 24px 8px; align-items: center; }
+  .rail-logo,
+  .nav-item-label,
+  .rail-playlists,
+  .rail-section-title { display: none; }
+  .rail-header { justify-content: center; margin-bottom: 8px; }
+  .rail-nav { width: 100%; }
+  .nav-item {
+    justify-content: center;
+    padding: 0;
+    width: var(--touch-lg);
+    height: var(--touch-lg);
+    gap: 0;
+    margin: 0 auto;
+  }
+  .rail-footer { width: 100%; }
+}
+
+/* Tiroir : le rail sort de l'écran et revient au tap sur le bouton menu. */
+@media (max-width: 767px) {
+  .rail {
+    width: 280px;
+    transform: translateX(-100%);
+    transition: transform 220ms ease;
+  }
+  .rail-open .rail { transform: translateX(0); }
+  .rail-close { display: flex; }
+  .rail-toggle { display: flex; }
+  .rail-backdrop { display: block; }
+
+  .main-content {
+    padding: 16px;
+    padding-top: 76px;
+    padding-bottom: calc(var(--npb-height) + 16px);
+  }
+}

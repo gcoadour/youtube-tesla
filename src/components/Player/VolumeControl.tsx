@@ -7,22 +7,29 @@ export default function VolumeControl() {
   const setVolume = usePlayerStore((s) => s.setVolume)
   const toggleMute = usePlayerStore((s) => s.toggleMute)
 
+  const effective = isMuted ? 0 : volume
+
   return (
     <div className="volume-control">
-      <button className="control-btn" onClick={toggleMute} aria-label="Mute">
-        {isMuted || volume === 0 ? <VolumeOffIcon size={20} /> : volume < 0.5 ? <VolumeMediumIcon size={20} /> : <VolumeHighIcon size={20} />}
+      <button
+        className="control-btn"
+        onClick={toggleMute}
+        aria-label={isMuted ? 'Rétablir le son' : 'Couper le son'}
+      >
+        {effective === 0 ? <VolumeOffIcon size={24} />
+          : effective < 0.5 ? <VolumeMediumIcon size={24} />
+          : <VolumeHighIcon size={24} />}
       </button>
       <div className="volume-slider">
-        <div
-          className="volume-fill"
-          style={{ width: `${(isMuted ? 0 : volume) * 100}%` }}
-        />
+        <div className="volume-track">
+          <div className="volume-fill" style={{ width: `${effective * 100}%` }} />
+        </div>
         <input
           type="range"
           min="0"
           max="1"
           step="0.01"
-          value={isMuted ? 0 : volume}
+          value={effective}
           onChange={(e) => setVolume(parseFloat(e.target.value))}
           className="volume-range"
           aria-label="Volume"

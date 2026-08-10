@@ -154,3 +154,59 @@ export function SettingsIcon({ size = 24, className }: IconProps) {
     </svg>
   )
 }
+
+export function ChevronDownIcon({ size = 24, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z" />
+    </svg>
+  )
+}
+
+export function ExpandIcon({ size = 24, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M4 14h2v4h4v2H4v-6zm16-4h-2V6h-4V4h6v6z" />
+    </svg>
+  )
+}
+
+export function DownloadIcon({ size = 24, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M12 3v10.17l3.59-3.58L17 11l-5 5-5-5 1.41-1.41L12 13.17V3h0zM5 18h14v2H5z" />
+    </svg>
+  )
+}
+
+export function DownloadDoneIcon({ size = 24, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M10.5 14.6 7.9 12l-1.4 1.4 4 4 7-7L16.1 9zM5 18h14v2H5z" />
+    </svg>
+  )
+}
+
+export function RefreshIcon({ size = 24, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M17.65 6.35A8 8 0 1 0 19.73 14h-2.08A6 6 0 1 1 12 6a5.94 5.94 0 0 1 4.22 1.78L13 11h7V4z" />
+    </svg>
+  )
+}
+
+export function TrashIcon({ size = 24, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14z" />
+    </svg>
+  )
+}
+
+export function ArrowUpIcon({ size = 24, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="m12 4 8 8-1.41 1.41L13 7.83V20h-2V7.83l-5.59 5.58L4 12z" />
+    </svg>
+  )
+}

@@ -1,0 +1,66 @@
+/**
+ * Jetons de design — cible : écran tactile Tesla, consulté en conduite.
+ *
+ * Deux règles gouvernent ces valeurs :
+ *  - aucune cible interactive sous --touch-min (56 px), doigt et non souris ;
+ *  - aucun texte utile sous 14 px, et 18 px pour le corps courant.
+ */
+
+:root {
+  /* Surfaces */
+  --bg-base: #121212;
+  --bg-elevated: #181818;
+  --bg-highlight: #282828;
+  --bg-pressed: #3a3a3a;
+  --bg-rail: #000000;
+  --bg-overlay: rgba(0, 0, 0, 0.72);
+
+  /* Texte */
+  --text-primary: #ffffff;
+  --text-secondary: #b3b3b3;
+  --text-subtle: #8a8a8a;
+
+  /* Accents */
+  --accent: #1ed760;
+  --accent-hover: #1fdf64;
+  --danger: #f15e5e;
+  --border: #333333;
+
+  /* Échelle typographique */
+  --fs-label: 14px;
+  --fs-sm: 16px;
+  --fs-body: 18px;
+  --fs-lg: 20px;
+  --fs-xl: 24px;
+  --fs-2xl: 32px;
+  --fs-3xl: 40px;
+
+  /* Ergonomie tactile */
+  --touch-min: 56px;
+  --touch-lg: 72px;
+
+  /* Gabarit */
+  --rail-width: 240px;
+  --rail-width-compact: 96px;
+  --npb-height: 128px;
+  --radius: 10px;
+  --radius-lg: 16px;
+  --transition: 160ms ease;
+}
+
+/* Rail réduit aux icônes : l'espace horizontal passe au contenu. */
+@media (max-width: 1279px) {
+  :root {
+    --rail-width: var(--rail-width-compact);
+  }
+}
+
+@media (max-width: 767px) {
+  :root {
+    --rail-width: 0px;
+    --npb-height: 104px;
+    --fs-3xl: 30px;
+    --fs-2xl: 24px;
+    --fs-xl: 20px;
+  }
+}

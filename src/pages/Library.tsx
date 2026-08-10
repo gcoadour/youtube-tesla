@@ -1,58 +1,88 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { usePlayerStore } from '../store/playerStore'
 import PlaylistGrid from '../components/Playlist/PlaylistGrid'
-import { fetchPlaylistById, parsePlaylistId, resolveChannel, fetchChannelPlaylists } from '../services/youtube'
+import {
+  importPlaylist, parsePlaylistId, resolveChannel, fetchChannelPlaylists,
+} from '../services/youtube'
+
+function message(err: unknown, fallback: string): string {
+  return err instanceof Error && err.message ? err.message : fallback
+}
 
 export default function Library() {
   const playlists = usePlayerStore((s) => s.playlists)
-  const importedPlaylists = usePlayerStore((s) => s.importedPlaylists)
+  const hydrated = usePlayerStore((s) => s.hydrated)
   const addPlaylist = usePlayerStore((s) => s.addPlaylist)
+  const removePlaylist = usePlayerStore((s) => s.removePlaylist)
+
   const [url, setUrl] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [warning, setWarning] = useState('')
+
   const [channelInput, setChannelInput] = useState('')
   const [channelLoading, setChannelLoading] = useState(false)
   const [channelError, setChannelError] = useState('')
   const [channelSuccess, setChannelSuccess] = useState('')
-  const hasLoadedRef = useRef(false)
+  const [channelProgress, setChannelProgress] = useState<{ done: number; total: number } | null>(null)
 
-  useEffect(() => {
-    if (hasLoadedRef.current) return
-    if (playlists.length > 0 || importedPlaylists.length === 0) {
-      hasLoadedRef.current = true
-      return
+  const [editing, setEditing] = useState(false)
+  const [refreshingId, setRefreshingId] = useState<string | null>(null)
+  const repairedRef = useRef(false)
+
+  const refreshPlaylist = useCallback(async (id: string) => {
+    setRefreshingId(id)
+    try {
+      const { playlist } = await importPlaylist(id)
+      addPlaylist(playlist)
+    } catch (err) {
+      setError(message(err, 'Actualisation impossible.'))
+    } finally {
+      setRefreshingId(null)
     }
+  }, [addPlaylist])
 
-    hasLoadedRef.current = true
-    const load = async () => {
-      for (const imp of importedPlaylists) {
-        const exists = playlists.some((p) => p.id === imp.id)
-        if (exists) continue
+  /**
+   * Complète les playlists persistées sans piste — typiquement celles dont
+   * l'import initial a échoué lors d'un import de chaîne. L'ancienne version
+   * sortait dès que la bibliothèque était non vide et ne les réparait jamais.
+   */
+  useEffect(() => {
+    if (!hydrated || repairedRef.current) return
+    const broken = playlists.filter((p) => p.tracks.length === 0)
+    if (broken.length === 0) return
+
+    repairedRef.current = true
+    void (async () => {
+      for (const p of broken) {
         try {
-          const playlist = await fetchPlaylistById(imp.id)
-          addPlaylist(playlist)
+          const { playlist } = await importPlaylist(p.id)
+          if (playlist.tracks.length > 0) addPlaylist(playlist)
         } catch {
-          // Skip failed imports silently
+          // La carte garde son badge « À actualiser ».
         }
       }
-    }
-    load()
-  }, [importedPlaylists, playlists, addPlaylist])
+    })()
+  }, [hydrated, playlists, addPlaylist])
 
   const handleImport = async () => {
     setError('')
+    setWarning('')
     const id = parsePlaylistId(url)
     if (!id) {
-      setError('Invalid YouTube playlist URL or ID')
+      setError('Lien ou identifiant de playlist YouTube non reconnu.')
       return
     }
     setLoading(true)
     try {
-      const playlist = await fetchPlaylistById(id)
+      const { playlist, warning: importWarning } = await importPlaylist(id)
       addPlaylist(playlist)
+      if (importWarning) setWarning(importWarning)
       setUrl('')
-    } catch {
-      setError('Failed to import playlist')
+    } catch (err) {
+      // La cause réelle est remontée telle quelle : « playlist privée »,
+      // « aucune instance disponible »… au lieu d'un message générique.
+      setError(message(err, "L'import a échoué."))
     } finally {
       setLoading(false)
     }
@@ -62,85 +92,131 @@ export default function Library() {
     setChannelError('')
     setChannelSuccess('')
     if (!channelInput.trim()) return
+
     setChannelLoading(true)
+    setChannelProgress(null)
     try {
       const channel = await resolveChannel(channelInput.trim())
       if (!channel) {
-        setChannelError('Could not find a YouTube channel matching that input')
+        setChannelError('Aucune chaîne YouTube ne correspond à cette saisie.')
         return
       }
-      const channelPlaylists = await fetchChannelPlaylists(channel.channelId)
+
+      const channelPlaylists = await fetchChannelPlaylists(channel.channelId, (done, total) =>
+        setChannelProgress({ done, total }),
+      )
       if (channelPlaylists.length === 0) {
-        setChannelError('No public playlists found for this channel')
+        setChannelError('Cette chaîne ne publie aucune playlist publique.')
         return
       }
+
       const existingIds = new Set(playlists.map((p) => p.id))
       let added = 0
       for (const pl of channelPlaylists) {
-        if (!existingIds.has(pl.id)) {
-          addPlaylist(pl)
-          added++
-        }
+        if (!existingIds.has(pl.id)) added++
+        addPlaylist(pl)
       }
-      setChannelSuccess(`${added} playlists imported from ${channel.name}${added < channelPlaylists.length ? ` (${channelPlaylists.length - added} already in library)` : ''}`)
+
+      const already = channelPlaylists.length - added
+      setChannelSuccess(
+        `${added} playlist${added > 1 ? 's' : ''} importée${added > 1 ? 's' : ''} depuis ${channel.name}` +
+        (already > 0 ? ` (${already} déjà présente${already > 1 ? 's' : ''}, mise${already > 1 ? 's' : ''} à jour)` : ''),
+      )
       setChannelInput('')
-    } catch {
-      setChannelError('Failed to fetch channel. Try again later.')
+    } catch (err) {
+      setChannelError(message(err, 'Impossible de récupérer cette chaîne. Réessayez plus tard.'))
     } finally {
       setChannelLoading(false)
+      setChannelProgress(null)
     }
   }
 
   return (
     <div className="page library-page">
-      <div className="library-header">
-        <h1 className="page-title">Your Library</h1>
+      <div className="page-header-row">
+        <h1 className="page-title">Ma bibliothèque</h1>
+        {playlists.length > 0 && (
+          <button className="btn-secondary" onClick={() => setEditing((v) => !v)}>
+            {editing ? 'Terminé' : 'Modifier'}
+          </button>
+        )}
       </div>
 
-      <div className="playlist-import">
-        <input
-          type="text"
-          placeholder="Paste YouTube playlist URL or ID..."
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          className="search-input"
-          onKeyDown={(e) => e.key === 'Enter' && handleImport()}
-        />
-        <button
-          className="btn-primary"
-          onClick={handleImport}
-          disabled={loading || !url.trim()}
-          style={{ marginLeft: 8 }}
-        >
-          {loading ? 'Importing...' : 'Import'}
-        </button>
+      <div className="import-block">
+        <div className="import-label">Importer une playlist</div>
+        <div className="import-row">
+          <input
+            type="text"
+            placeholder="Lien ou identifiant de playlist YouTube…"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            className="search-input"
+            onKeyDown={(e) => e.key === 'Enter' && handleImport()}
+          />
+          <button className="btn-primary" onClick={handleImport} disabled={loading || !url.trim()}>
+            {loading ? 'Import…' : 'Importer'}
+          </button>
+        </div>
         {error && <p className="error-text">{error}</p>}
+        {warning && <p className="warning-text">{warning}</p>}
       </div>
 
       <hr className="library-divider" />
 
-      <div className="playlist-import">
-        <input
-          type="text"
-          placeholder="Paste YouTube channel handle, URL, or name..."
-          value={channelInput}
-          onChange={(e) => setChannelInput(e.target.value)}
-          className="search-input"
-          onKeyDown={(e) => e.key === 'Enter' && handleChannelImport()}
-        />
-        <button
-          className="btn-primary"
-          onClick={handleChannelImport}
-          disabled={channelLoading || !channelInput.trim()}
-          style={{ marginLeft: 8 }}
-        >
-          {channelLoading ? 'Fetching...' : 'Import Channel'}
-        </button>
+      <div className="import-block">
+        <div className="import-label">Importer toutes les playlists d'une chaîne</div>
+        <div className="import-row">
+          <input
+            type="text"
+            placeholder="Nom, identifiant ou lien de chaîne YouTube…"
+            value={channelInput}
+            onChange={(e) => setChannelInput(e.target.value)}
+            className="search-input"
+            onKeyDown={(e) => e.key === 'Enter' && handleChannelImport()}
+          />
+          <button
+            className="btn-primary"
+            onClick={handleChannelImport}
+            disabled={channelLoading || !channelInput.trim()}
+          >
+            {channelLoading ? 'Import…' : 'Importer la chaîne'}
+          </button>
+        </div>
+
+        {channelProgress && (
+          <div className="import-progress">
+            <span>{channelProgress.done} / {channelProgress.total} playlists</span>
+            <div className="import-progress-track">
+              <div
+                className="import-progress-fill"
+                style={{ width: `${channelProgress.total ? (channelProgress.done / channelProgress.total) * 100 : 0}%` }}
+              />
+            </div>
+          </div>
+        )}
         {channelError && <p className="error-text">{channelError}</p>}
         {channelSuccess && <p className="success-text">{channelSuccess}</p>}
       </div>
 
-      <PlaylistGrid playlists={playlists} />
+      {!hydrated ? (
+        <div className="search-status">
+          <span className="spinner" />
+          <span>Chargement de la bibliothèque…</span>
+        </div>
+      ) : playlists.length === 0 ? (
+        <div className="empty-state">
+          <p>Votre bibliothèque est vide.</p>
+          <p>Collez le lien d'une playlist YouTube ci-dessus pour commencer.</p>
+        </div>
+      ) : (
+        <PlaylistGrid
+          playlists={playlists}
+          editing={editing}
+          onDelete={removePlaylist}
+          onRefresh={refreshPlaylist}
+          refreshingId={refreshingId}
+        />
+      )}
     </div>
   )
 }

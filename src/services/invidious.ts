@@ -1,162 +1,189 @@
-const INSTANCES_API = 'https://api.invidious.io/instances.json'
-const REFRESH_INTERVAL = 30 * 60 * 1000 // 30 minutes
+/**
+ * Client Invidious. La découverte d'instances vit désormais dans instances.ts ;
+ * ce module ne s'occupe plus que des endpoints.
+ */
 
-export interface InvidiousInstance {
-  uri: string
-  apiUrl: string
-  cors: boolean
-  api: boolean
-  uptime: number
-  playbackRatio: number
-  lastCheckAt: string
-  score: number
-  penalizedUntil: number
+import { fetchFromInstances, getAvailableInstances } from './instances'
+import type { Track } from '../types'
+
+/** Nombre de vidéos renvoyées par page par l'API playlists d'Invidious. */
+const PLAYLIST_PAGE_SIZE = 100
+
+export interface InvidiousSearchItem {
+  videoId: string
+  title: string
+  author: string
+  lengthSeconds: number
 }
 
-interface InstanceScore {
-  uptime: number
-  playbackRatio: number
-  recency: number
+function toTrack(v: any): Track | null {
+  if (!v?.videoId) return null
+  return {
+    id: v.videoId,
+    videoId: v.videoId,
+    title: v.title || 'Sans titre',
+    artist: v.author || 'Artiste inconnu',
+    thumbnail: `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
+    duration: typeof v.lengthSeconds === 'number' ? v.lengthSeconds : 0,
+  }
 }
 
-let instances: InvidiousInstance[] = []
-let lastFetch = 0
-
-function computeScore(monitor: any, playback: any): InstanceScore {
-  const uptime = monitor?.uptime ?? 50
-  const playbackRatio = playback?.ratio ?? 0.5
-  const lastCheck = monitor?.last_check_at ?? ''
-  const recency = lastCheck
-    ? Math.max(0, 100 - (Date.now() - new Date(lastCheck).getTime()) / (60 * 60 * 1000))
-    : 50
-
-  return { uptime, playbackRatio, recency }
+export async function searchVideos(query: string): Promise<InvidiousSearchItem[]> {
+  const { data } = await fetchFromInstances(
+    'invidious',
+    `/search?q=${encodeURIComponent(query)}&type=video`,
+  )
+  return Array.isArray(data) ? data : []
 }
 
-function calculateFinalScore(s: InstanceScore): number {
-  return s.uptime * 0.4 + s.playbackRatio * 100 * 0.4 + s.recency * 0.2
+export interface InvidiousPlaylist {
+  title: string
+  description: string
+  thumbnail: string
+  tracks: Track[]
 }
 
-function sortInstances(): void {
-  instances.sort((a, b) => b.score - a.score)
-}
+/**
+ * Récupère une playlist en suivant les pages tant qu'elles sont pleines.
+ * Sans cela les playlists sont tronquées aux 100 premiers titres.
+ */
+export async function getPlaylist(playlistId: string, maxPages = 20): Promise<InvidiousPlaylist> {
+  const first = await fetchFromInstances(
+    'invidious',
+    `/playlists/${encodeURIComponent(playlistId)}`,
+  )
 
-export async function fetchInstances(): Promise<void> {
-  const now = Date.now()
-  if (instances.length > 0 && now - lastFetch < REFRESH_INTERVAL) return
+  const data = first.data
+  const tracks: Track[] = []
+  // Certaines instances ignorent `?page=` et renvoient toujours la première
+  // page : sans dédoublonnage, la boucle empilerait 20 fois la même playlist.
+  const seen = new Set<string>()
 
-  try {
-    const res = await fetch(INSTANCES_API)
-    if (!res.ok) return
-
-    const data: [string, any][] = await res.json()
-    const parsed: InvidiousInstance[] = []
-
-    for (const [, info] of data) {
-      if (info.type !== 'https') continue
-      if (info.cors !== true) continue
-      if (!info.uri) continue
-
-      const s = computeScore(info.monitor, info.stats?.playback)
-      parsed.push({
-        uri: info.uri,
-        apiUrl: `${info.uri}/api/v1`,
-        cors: info.cors,
-        api: info.api ?? false,
-        uptime: s.uptime,
-        playbackRatio: s.playbackRatio,
-        lastCheckAt: info.monitor?.last_check_at ?? '',
-        score: calculateFinalScore(s),
-        penalizedUntil: 0,
-      })
+  const appendPage = (videos: any[]): number => {
+    let added = 0
+    for (const v of videos) {
+      const track = toTrack(v)
+      if (!track || seen.has(track.videoId)) continue
+      seen.add(track.videoId)
+      tracks.push(track)
+      added++
     }
-
-    if (parsed.length > 0) {
-      instances = parsed
-      sortInstances()
-      lastFetch = now
-    }
-  } catch {
-    // keep existing instances on fetch failure
-  }
-}
-
-export function getAvailableInstances(): InvidiousInstance[] {
-  const now = Date.now()
-  return instances.filter(i => i.penalizedUntil < now)
-}
-
-export function penalizeInstance(uri: string, durationMs: number = 60_000): void {
-  const inst = instances.find(i => i.uri === uri)
-  if (inst) {
-    inst.score *= 0.5
-    inst.penalizedUntil = Date.now() + durationMs
-    sortInstances()
-  }
-}
-
-export function boostInstance(uri: string): void {
-  const inst = instances.find(i => i.uri === uri)
-  if (inst) {
-    inst.score = Math.min(100, inst.score * 1.1)
-    sortInstances()
-  }
-}
-
-export async function fetchFromInvidious(
-  path: string,
-  options?: RequestInit,
-  maxAttempts: number = 3
-): Promise<{ data: any; instanceUri: string }> {
-  await fetchInstances()
-  const available = getAvailableInstances()
-
-  if (available.length === 0) {
-    throw new Error('No Invidious instances available')
+    return added
   }
 
-  let lastError: Error | null = null
-  const tried = new Set<string>()
+  let lastCount = appendPage(data?.videos || [])
+  let page = 1
 
-  for (let attempt = 0; attempt < maxAttempts && attempt < available.length; attempt++) {
-    const instance = available.find(i => !tried.has(i.uri)) ?? available[0]
-    tried.add(instance.uri)
-
+  // On reste sur l'instance qui a répondu : changer d'instance en cours de
+  // pagination donnerait un ordre incohérent.
+  while (lastCount >= PLAYLIST_PAGE_SIZE && page < maxPages) {
+    page++
     try {
-      const res = await fetch(`${instance.apiUrl}${path}`, options)
-      if (!res.ok) {
-        penalizeInstance(instance.uri)
-        lastError = new Error(`HTTP ${res.status}`)
-        continue
-      }
-
-      const data = await res.json()
-      if (data?.error) {
-        penalizeInstance(instance.uri)
-        lastError = new Error(data.error)
-        continue
-      }
-
-      boostInstance(instance.uri)
-      return { data, instanceUri: instance.uri }
-    } catch (err) {
-      penalizeInstance(instance.uri)
-      lastError = err instanceof Error ? err : new Error(String(err))
+      const res = await fetch(
+        `${first.instance.apiUrl}/playlists/${encodeURIComponent(playlistId)}?page=${page}`,
+      )
+      if (!res.ok) break
+      const pageData = await res.json()
+      const added = appendPage(pageData?.videos || [])
+      if (added === 0) break
+      lastCount = added
+    } catch {
+      break
     }
   }
 
-  throw lastError ?? new Error('All Invidious instances failed')
+  return {
+    title: data?.title || 'Playlist sans titre',
+    description: data?.description || '',
+    thumbnail: data?.thumbnailUrl || tracks[0]?.thumbnail || '',
+    tracks,
+  }
 }
 
-export async function getAudioUrlFromInvidious(videoId: string): Promise<string> {
-  const { data } = await fetchFromInvidious(`/videos/${encodeURIComponent(videoId)}`)
+export interface InvidiousChannel {
+  channelId: string
+  name: string
+  thumbnail: string
+}
 
-  const audioFormats = (data.adaptiveFormats || [])
-    .filter((f: any) => f.type?.startsWith('audio/'))
-    .sort((a: any, b: any) => b.bitrate - a.bitrate)
+export async function getChannel(channelId: string): Promise<InvidiousChannel> {
+  const { data } = await fetchFromInstances('invidious', `/channels/${encodeURIComponent(channelId)}`)
+  return {
+    channelId,
+    name: data?.author || 'Chaîne inconnue',
+    thumbnail: data?.authorThumbnails?.[data.authorThumbnails.length - 1]?.url || '',
+  }
+}
 
-  if (audioFormats.length > 0) return audioFormats[0].url
-  if (data.formatStreams?.length > 0) return data.formatStreams[0].url
+export async function searchChannel(query: string): Promise<InvidiousChannel | null> {
+  const { data } = await fetchFromInstances(
+    'invidious',
+    `/search?q=${encodeURIComponent(query)}&type=channel`,
+  )
+  const channel = Array.isArray(data) ? data[0] : null
+  if (!channel?.authorId) return null
+  return {
+    channelId: channel.authorId,
+    name: channel.author || 'Chaîne inconnue',
+    thumbnail: channel.authorThumbnails?.[channel.authorThumbnails.length - 1]?.url || '',
+  }
+}
 
-  throw new Error('No audio formats found')
+export async function getChannelPlaylistIds(
+  channelId: string,
+): Promise<{ id: string; title: string }[]> {
+  const ids: { id: string; title: string }[] = []
+  let continuation: string | undefined
+  let guard = 0
+
+  do {
+    let path = `/channels/${encodeURIComponent(channelId)}/playlists?sort=oldest`
+    if (continuation) path += `&continuation=${encodeURIComponent(continuation)}`
+    const { data } = await fetchFromInstances('invidious', path)
+
+    const items: any[] = Array.isArray(data)
+      ? data
+      : Array.isArray(data?.playlists)
+        ? data.playlists
+        : []
+
+    for (const item of items) {
+      const pid = item.playlistId || item.id
+      // LL = « Vidéos likées », inaccessible sans compte.
+      if (pid && !pid.startsWith('LL')) {
+        ids.push({ id: pid, title: item.title || 'Playlist sans titre' })
+      }
+    }
+
+    continuation = data?.continuation
+    guard++
+  } while (continuation && guard < 10)
+
+  return ids
+}
+
+/**
+ * URL du flux audio relayée par l'instance (`local=true`).
+ *
+ * C'est le point clé de la lecture en production : l'URL googlevideo brute
+ * renvoyée par `adaptiveFormats` n'a aucun en-tête CORS, donc ni <audio> fiable
+ * ni fetch() possible depuis GitHub Pages. `latest_version` fait relayer le flux
+ * par l'instance, qui répond avec CORS et gère les requêtes Range.
+ *
+ * itag 140 = AAC 128 kb/s, le format audio le plus universellement présent.
+ */
+export async function getAudioStreamUrl(videoId: string): Promise<string> {
+  const available = getAvailableInstances('invidious')
+  if (available.length === 0) {
+    throw new Error('Aucune instance Invidious disponible')
+  }
+
+  // On vérifie que la vidéo est lisible avant de renvoyer une URL de flux :
+  // cela évite de coller au <audio> une URL qui répondra 403.
+  const { instance } = await fetchFromInstances(
+    'invidious',
+    `/videos/${encodeURIComponent(videoId)}`,
+  )
+
+  return `${instance.origin}/latest_version?id=${encodeURIComponent(videoId)}&itag=140&local=true`
 }

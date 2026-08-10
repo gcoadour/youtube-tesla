@@ -7,5 +7,9 @@ export default defineConfig({
   base: '/youtube-tesla/',
   build: {
     outDir: 'docs',
+    // Le navigateur embarqué Tesla est un Chromium ancien selon le millésime du
+    // véhicule. La cible « modules » par défaut de Vite suppose un moteur récent
+    // et peut produire une page blanche ; on descend explicitement.
+    target: ['chrome87', 'safari14'],
   },
 })

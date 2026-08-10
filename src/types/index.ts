@@ -4,6 +4,7 @@ export interface Track {
   title: string
   artist: string
   thumbnail: string
+  /** En secondes. 0 signifie « durée inconnue », pas « piste vide ». */
   duration: number
   album?: string
 }
@@ -33,6 +34,10 @@ export interface PlayerState {
   isMuted: boolean
   shuffle: boolean
   repeat: 'off' | 'all' | 'one'
+  /** Message affiché à l'utilisateur quand aucune source audio ne répond. */
+  playbackError: string | null
+  /** Vrai pendant la résolution de l'URL et la mise en tampon. */
+  isLoading: boolean
 }
 
 export interface YouTubeSearchResult {
@@ -40,7 +45,8 @@ export interface YouTubeSearchResult {
   title: string
   artist: string
   thumbnail: string
-  duration: string
+  /** En secondes, comme Track.duration — la mise en forme se fait à l'affichage. */
+  duration: number
 }
 
 export interface ImportedPlaylist {

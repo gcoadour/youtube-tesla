@@ -1,5 +1,10 @@
 import { useEffect, useState, useCallback } from 'react'
-import { getCacheInfo, getAllCachedTracks, deleteAudio, clearCache as clearAllCache } from '../services/audioCache'
+import { getCacheInfo, getAllCachedTracks, deleteAudio, clearCache } from '../services/audioCache'
+import {
+  getInstances, checkInstances, addUserInstance, removeUserInstance, prioritizeInstance,
+} from '../services/instances'
+import type { Instance, InstanceKind } from '../services/instances'
+import { TrashIcon, ArrowUpIcon, RefreshIcon } from '../components/common/Icons'
 
 interface CachedEntry {
   videoId: string
@@ -8,9 +13,9 @@ interface CachedEntry {
 }
 
 function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  if (bytes < 1024) return `${bytes} o`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} Ko`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`
 }
 
 export default function SettingsPage() {
@@ -19,47 +24,152 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true)
   const [confirmClear, setConfirmClear] = useState(false)
 
+  const [instances, setInstances] = useState<Instance[]>([])
+  const [checking, setChecking] = useState(false)
+  const [newOrigin, setNewOrigin] = useState('')
+  const [newKind, setNewKind] = useState<InstanceKind>('invidious')
+  const [instanceError, setInstanceError] = useState('')
+
   const refreshCache = useCallback(async () => {
     setLoading(true)
     const [info, tracks] = await Promise.all([getCacheInfo(), getAllCachedTracks()])
     setCacheInfo(info)
     setCachedTracks(
-      tracks.map((t) => ({ videoId: t.videoId, size: t.size, cachedAt: t.cachedAt }))
-        .sort((a, b) => b.cachedAt - a.cachedAt)
+      tracks
+        .map((t) => ({ videoId: t.videoId, size: t.size, cachedAt: t.cachedAt }))
+        .sort((a, b) => b.cachedAt - a.cachedAt),
     )
     setLoading(false)
   }, [])
 
-  useEffect(() => { refreshCache() }, [refreshCache])
+  const refreshInstances = useCallback(() => setInstances(getInstances()), [])
 
-  const handleDelete = async (videoId: string) => {
+  useEffect(() => { refreshCache() }, [refreshCache])
+  useEffect(() => { refreshInstances() }, [refreshInstances])
+
+  const handleCheckInstances = async () => {
+    setChecking(true)
+    await checkInstances(true)
+    refreshInstances()
+    setChecking(false)
+  }
+
+  const handleAddInstance = () => {
+    setInstanceError('')
+    if (!addUserInstance(newKind, newOrigin)) {
+      setInstanceError('Adresse invalide. Format attendu : https://exemple.tld')
+      return
+    }
+    setNewOrigin('')
+    refreshInstances()
+  }
+
+  const handleDeleteCached = async (videoId: string) => {
     await deleteAudio(videoId)
     refreshCache()
   }
 
   const handleClearAll = async () => {
-    await clearAllCache()
+    await clearCache()
     setConfirmClear(false)
     refreshCache()
   }
 
   return (
     <div className="page settings-page">
-      <h1 className="page-title">Settings</h1>
+      <h1 className="page-title">Réglages</h1>
 
-      <div className="settings-section">
-        <h3>Offline Cache</h3>
+      <section className="settings-section">
+        <h2>Sources</h2>
         <p className="settings-desc">
-          Tracks you play are automatically cached for offline listening.
+          La recherche, l'import et la lecture passent par des instances publiques Invidious et
+          Piped. Ces instances sont régulièrement bloquées par YouTube : si plus rien ne
+          fonctionne, relancez la vérification, puis remontez ou ajoutez une instance connue.
         </p>
+
+        <div className="settings-row" style={{ marginBottom: 16 }}>
+          <button className="btn-secondary" onClick={handleCheckInstances} disabled={checking}>
+            {checking ? 'Vérification…' : 'Vérifier les instances'}
+          </button>
+        </div>
+
+        <div className="instance-list">
+          {instances.map((inst) => (
+            <div key={inst.origin} className="instance-item">
+              <span className="instance-kind">{inst.kind}</span>
+              <span className="instance-origin">{inst.origin}</span>
+              <span
+                className={`instance-state ${
+                  inst.unverified ? '' : inst.penalizedUntil > Date.now() ? 'down' : 'up'
+                }`}
+              >
+                {inst.unverified
+                  ? 'non vérifiée'
+                  : inst.penalizedUntil > Date.now()
+                    ? 'hors service'
+                    : `score ${Math.round(inst.score)}`}
+              </span>
+              <button
+                className="icon-btn"
+                onClick={() => { prioritizeInstance(inst.origin); refreshInstances() }}
+                aria-label={`Prioriser ${inst.origin}`}
+                title="Prioriser cette instance"
+              >
+                <ArrowUpIcon size={22} />
+              </button>
+              {inst.userAdded && (
+                <button
+                  className="icon-btn danger"
+                  onClick={() => { removeUserInstance(inst.origin); refreshInstances() }}
+                  aria-label={`Retirer ${inst.origin}`}
+                >
+                  <TrashIcon size={22} />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div className="settings-row">
+          <select
+            className="settings-select"
+            value={newKind}
+            onChange={(e) => setNewKind(e.target.value as InstanceKind)}
+            aria-label="Type d'instance"
+          >
+            <option value="invidious">Invidious</option>
+            <option value="piped">Piped (API)</option>
+          </select>
+          <input
+            type="url"
+            className="search-input"
+            placeholder="https://exemple.tld"
+            value={newOrigin}
+            onChange={(e) => setNewOrigin(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleAddInstance()}
+          />
+          <button className="btn-primary" onClick={handleAddInstance} disabled={!newOrigin.trim()}>
+            Ajouter
+          </button>
+        </div>
+        {instanceError && <p className="error-text">{instanceError}</p>}
+      </section>
+
+      <section className="settings-section">
+        <h2>Écoute hors ligne</h2>
+        <p className="settings-desc">
+          Les titres ne sont plus mis en cache automatiquement : utilisez le bouton de
+          téléchargement sur une piste pour la conserver hors ligne.
+        </p>
+
         {loading ? (
-          <p className="settings-desc">Loading cache info...</p>
+          <div className="search-status"><span className="spinner" /><span>Lecture du cache…</span></div>
         ) : cacheInfo.count === 0 ? (
-          <p className="settings-desc">No cached tracks yet. Play some music to build the cache.</p>
+          <p className="settings-desc">Aucun titre téléchargé pour l'instant.</p>
         ) : (
           <>
             <p className="settings-desc">
-              <strong>{cacheInfo.count}</strong> track{cacheInfo.count > 1 ? 's' : ''} cached —
+              <strong>{cacheInfo.count}</strong> titre{cacheInfo.count > 1 ? 's' : ''} —
               <strong> {formatSize(cacheInfo.totalSize)}</strong>
             </p>
             <div className="cache-track-list">
@@ -68,47 +178,47 @@ export default function SettingsPage() {
                   <span className="cache-track-id">{t.videoId}</span>
                   <span className="cache-track-size">{formatSize(t.size)}</span>
                   <button
-                    className="cache-delete-btn"
-                    onClick={() => handleDelete(t.videoId)}
-                    aria-label="Remove from cache"
+                    className="icon-btn danger"
+                    onClick={() => handleDeleteCached(t.videoId)}
+                    aria-label="Retirer du hors ligne"
                   >
-                    ×
+                    <TrashIcon size={22} />
                   </button>
                 </div>
               ))}
             </div>
             {!confirmClear ? (
-              <button className="btn-secondary cache-clear-btn" onClick={() => setConfirmClear(true)}>
-                Clear all cache
+              <button className="btn-secondary" onClick={() => setConfirmClear(true)}>
+                Tout supprimer
               </button>
             ) : (
-              <div className="cache-confirm-row">
-                <span className="settings-desc">Are you sure?</span>
-                <button className="btn-primary cache-confirm-yes" onClick={handleClearAll}>
-                  Yes, clear all
-                </button>
-                <button className="btn-secondary" onClick={() => setConfirmClear(false)}>
-                  Cancel
-                </button>
+              <div className="confirm-row">
+                <span className="settings-desc" style={{ margin: 0 }}>Confirmer la suppression ?</span>
+                <button className="btn-primary" onClick={handleClearAll}>Oui, tout supprimer</button>
+                <button className="btn-secondary" onClick={() => setConfirmClear(false)}>Annuler</button>
               </div>
             )}
           </>
         )}
-      </div>
+      </section>
 
-      <div className="settings-section">
-        <h3>About</h3>
+      <section className="settings-section">
+        <h2>À propos</h2>
         <p className="settings-desc">
-          YouTube Music Tesla — a web-based music player that uses YouTube as its source.
+          YouTube Music Tesla — lecteur audio web utilisant YouTube comme source, pensé pour
+          l'écran tactile de la voiture.
         </p>
         <p className="settings-desc">
-          Search is powered by a public Invidious API instance. Playlist import uses YouTube RSS feeds.
-          Ad skipping uses the SponsorBlock API.
+          Recherche et lecture via les API publiques Invidious et Piped. Import de playlist par
+          l'API des instances, avec repli sur les flux RSS YouTube. Passage des segments
+          sponsorisés via SponsorBlock. Aucune clé d'API ni compte requis.
         </p>
-        <p className="settings-desc">
-          No API key or account required.
-        </p>
-      </div>
+      </section>
+
+      <p className="settings-desc" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <RefreshIcon size={18} />
+        Les scores d'instances sont réévalués automatiquement toutes les 30 minutes.
+      </p>
     </div>
   )
 }
