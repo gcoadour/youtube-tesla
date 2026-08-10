@@ -32,14 +32,22 @@ const REFRESH_INTERVAL = 30 * 60 * 1000 // 30 minutes
 const HEALTH_TIMEOUT = 4000
 const DEFAULT_SCORE = 50
 
-/** Instances Invidious connues pour exposer CORS. Modifier ici pour en ajouter. */
+/**
+ * Instances Invidious publiques officielles, dans l'ordre de la documentation
+ * (de la plus ancienne à la plus récente) :
+ * https://docs.invidious.io/instances/ — relevé le 2026-08-10.
+ *
+ * La documentation avertit que « toute instance publique absente de cette liste
+ * est considérée comme non fiable », d'où le choix de n'embarquer que celles-ci.
+ * La liste est courte et bouge : à réviser depuis la source ci-dessus quand la
+ * lecture devient instable, ou à compléter au cas par cas depuis Réglages.
+ */
 const INVIDIOUS_SEEDS = [
-  'https://yewtu.be',
-  'https://invidious.nerdvpn.de',
-  'https://inv.nadeko.net',
-  'https://invidious.jing.rocks',
-  'https://invidious.privacyredirect.com',
-  'https://iv.melmac.space',
+  'https://inv.nadeko.net',          // CL — protégée par un défi anti-bot « Go-away »
+  'https://invidious.nerdvpn.de',    // UA
+  'https://yt.chocolatemoo53.com',   // US
+  'https://invidious.tiekoetter.com',// DE
+  'https://invidious.f5.si',         // JP
 ]
 
 /** Instances Piped (API). Les flux audio Piped sont déjà relayés avec CORS. */

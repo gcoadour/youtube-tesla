@@ -86,6 +86,13 @@ export default function SettingsPage() {
           Piped. Ces instances sont régulièrement bloquées par YouTube : si plus rien ne
           fonctionne, relancez la vérification, puis remontez ou ajoutez une instance connue.
         </p>
+        <p className="settings-desc">
+          La liste officielle des instances Invidious est publiée sur{' '}
+          <a href="https://docs.invidious.io/instances/" target="_blank" rel="noreferrer" className="settings-link">
+            docs.invidious.io/instances
+          </a>{' '}
+          — les instances qui n'y figurent pas sont considérées comme non fiables par le projet.
+        </p>
 
         <div className="settings-row" style={{ marginBottom: 16 }}>
           <button className="btn-secondary" onClick={handleCheckInstances} disabled={checking}>
