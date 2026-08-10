@@ -10,6 +10,7 @@ import { getAudioStreamUrl as getInvidiousUrl, audioUrlFor } from './invidious'
 import { getAudioStreamUrl as getPipedUrl } from './piped'
 import { getAvailableInstances } from './instances'
 import { proxyVariants, proxyOrigin } from './corsProxy'
+import { getAudioStreamUrl as getCobaltUrl, isCobaltConfigured } from './cobalt'
 
 /**
  * Le proxy yt-dlp n'existe que dans le serveur de développement Vite.
@@ -28,7 +29,7 @@ export const DEV_PROXY_ORIGIN = 'dev-proxy'
 
 export interface ResolvedStream {
   url: string
-  source: 'dev-proxy' | 'invidious' | 'piped' | 'proxy'
+  source: 'dev-proxy' | 'cobalt' | 'invidious' | 'piped' | 'proxy'
   /** Origine de l'instance ayant fourni l'URL, à exclure si le flux échoue. */
   origin: string
 }
@@ -50,6 +51,20 @@ export async function resolveStream(
 
   if (isDev() && !excluded.has(DEV_PROXY_ORIGIN)) {
     return { url: `/api/yt-audio/${videoId}`, source: 'dev-proxy', origin: DEV_PROXY_ORIGIN }
+  }
+
+  /*
+   * Cobalt d'abord quand il est configuré : c'est l'instance de l'utilisateur,
+   * donc la seule source qui ne dépende ni d'un annuaire public, ni d'un
+   * dispositif anti-bot tiers, ni d'un relais CORS.
+   */
+  if (isCobaltConfigured()) {
+    try {
+      const { url, origin } = await getCobaltUrl(videoId)
+      if (!excluded.has(origin)) return { url, source: 'cobalt', origin }
+    } catch (err) {
+      errors.push(err instanceof Error ? err.message : String(err))
+    }
   }
 
   try {

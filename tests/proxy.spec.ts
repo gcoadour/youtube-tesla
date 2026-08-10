@@ -95,3 +95,69 @@ test.describe('Relais CORS', () => {
     )
   })
 })
+
+test.describe('Instance Cobalt', () => {
+  test.beforeEach(async ({ page }) => {
+    await mockInstances(page)
+    await mockAudioStream(page)
+  })
+
+  test('une instance configurée devient la source prioritaire', async ({ page }) => {
+    await page.goto(`${BASE}/settings`)
+    await page.getByLabel("URL de l'instance Cobalt").fill('https://cobalt.test')
+    await page.getByRole('button', { name: 'Enregistrer' }).click()
+
+    // Contrat officiel : POST /, réponse { status: 'tunnel', url }.
+    let method = ''
+    let body: any = null
+    await page.route('https://cobalt.test/', (route) => {
+      method = route.request().method()
+      body = route.request().postDataJSON()
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ status: 'tunnel', url: 'https://cobalt.test/tunnel/abc', filename: 'a.m4a' }),
+      })
+    })
+    await page.route('https://cobalt.test/tunnel/**', (route) => route.fulfill(silentWav()))
+
+    await page.goto(`${BASE}/search`)
+    await page.locator('.search-input').fill('Rick Astley')
+    await expect(page.locator('.track-item').first()).toBeVisible({ timeout: 20_000 })
+    await page.locator('.track-item').first().click()
+
+    await page.waitForFunction(
+      () => (document.querySelector('audio')?.src ?? '').includes('cobalt.test/tunnel'),
+      { timeout: 30_000 },
+    )
+
+    expect(method).toBe('POST')
+    expect(body.downloadMode).toBe('audio')
+    expect(body.url).toContain('dQw4w9WgXcQ')
+  })
+
+  test('une instance Cobalt en erreur laisse les autres sources prendre le relais', async ({ page }) => {
+    await page.goto(`${BASE}/settings`)
+    await page.getByLabel("URL de l'instance Cobalt").fill('https://cobalt.test')
+    await page.getByRole('button', { name: 'Enregistrer' }).click()
+
+    await page.route('https://cobalt.test/', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ status: 'error', error: { code: 'error.api.fetch.fail' } }),
+      }),
+    )
+
+    await page.goto(`${BASE}/search`)
+    await page.locator('.search-input').fill('Rick Astley')
+    await expect(page.locator('.track-item').first()).toBeVisible({ timeout: 20_000 })
+    await page.locator('.track-item').first().click()
+
+    // Repli sur Invidious : une instance Cobalt en panne ne doit rien bloquer.
+    await page.waitForFunction(
+      () => (document.querySelector('audio')?.src ?? '').includes('latest_version'),
+      { timeout: 30_000 },
+    )
+  })
+})

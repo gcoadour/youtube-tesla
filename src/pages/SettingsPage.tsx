@@ -9,6 +9,7 @@ import type { InstanceDiagnostic } from '../services/diagnostics'
 import { createPrimedProbe } from '../services/audioUnlock'
 import { getProxyMode, setProxyMode, CORS_PROXIES } from '../services/corsProxy'
 import type { ProxyMode } from '../services/corsProxy'
+import { getCobaltConfig, setCobaltConfig } from '../services/cobalt'
 import { getThemePreference, setThemePreference, resolveTheme, watchSystemTheme } from '../services/theme'
 import type { ThemePreference } from '../services/theme'
 import { TrashIcon, ArrowUpIcon, RefreshIcon } from '../components/common/Icons'
@@ -42,6 +43,9 @@ export default function SettingsPage() {
 
   const [instances, setInstances] = useState<Instance[]>([])
   const [checking, setChecking] = useState(false)
+  const [cobalt, setCobalt] = useState(getCobaltConfig)
+  const [cobaltSaved, setCobaltSaved] = useState(false)
+
   const [proxyMode, setProxyModeState] = useState<ProxyMode>(getProxyMode)
 
   const [diagnostics, setDiagnostics] = useState<InstanceDiagnostic[]>([])
@@ -307,6 +311,51 @@ export default function SettingsPage() {
           </button>
         </div>
         {instanceError && <p className="error-text">{instanceError}</p>}
+      </section>
+
+      <section className="settings-section">
+        <h2>Instance Cobalt</h2>
+        <p className="settings-desc">
+          Cobalt résout une URL YouTube en flux audio direct, servi par l'instance elle-même.
+          C'est la source la plus fiable : elle ne dépend ni d'un annuaire public, ni du
+          dispositif anti-bot d'un tiers, ni d'un relais. Quand elle est renseignée, elle passe
+          avant toutes les autres.
+        </p>
+        <p className="settings-desc">
+          La documentation de Cobalt est explicite : les instances hébergées comme
+          api.cobalt.tools emploient une protection anti-bot et ne sont pas destinées à être
+          utilisées par d'autres projets sans autorisation. Renseignez donc votre propre
+          instance (<code>docker compose up</code> suffit), ou une instance dont l'opérateur
+          vous a donné accès.
+        </p>
+
+        <div className="settings-row" style={{ marginBottom: 12 }}>
+          <input
+            type="url"
+            className="search-input"
+            placeholder="https://cobalt.exemple.fr"
+            value={cobalt.url}
+            onChange={(e) => { setCobalt({ ...cobalt, url: e.target.value }); setCobaltSaved(false) }}
+            aria-label="URL de l'instance Cobalt"
+          />
+        </div>
+        <div className="settings-row">
+          <input
+            type="text"
+            className="search-input"
+            placeholder="Jeton (facultatif) — « Api-Key … » ou « Bearer … »"
+            value={cobalt.key}
+            onChange={(e) => { setCobalt({ ...cobalt, key: e.target.value }); setCobaltSaved(false) }}
+            aria-label="Jeton d'authentification Cobalt"
+          />
+          <button
+            className="btn-primary"
+            onClick={() => { setCobaltConfig(cobalt); setCobalt(getCobaltConfig()); setCobaltSaved(true) }}
+          >
+            Enregistrer
+          </button>
+        </div>
+        {cobaltSaved && <p className="success-text">Instance enregistrée.</p>}
       </section>
 
       <section className="settings-section">
