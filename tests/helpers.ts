@@ -32,7 +32,17 @@ export async function mockInstances(page: Page, options: {
     }),
   )
 
-  // Health-check Piped (Piped n'a pas d'annuaire équivalent).
+  // Annuaire Piped : la documentation officielle demande de le parser
+  // dynamiquement. Une entrée suffit à rendre le comportement déterministe.
+  await page.route('**/piped-instances.kavin.rocks/**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([{ name: 'Piped test', api_url: 'https://piped-dyn.test' }]),
+    }),
+  )
+
+  // Health-check Piped.
   await page.route('**/healthcheck', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: '{"status":"ok"}' }),
   )

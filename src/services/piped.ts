@@ -1,10 +1,20 @@
 /**
  * Client Piped — seconde famille d'API, utilisée en repli d'Invidious.
  *
+ * Écrit d'après la spécification OpenAPI officielle
+ * (TeamPiped/OpenAPI, swagger.yaml), référencée par
+ * https://docs.piped.video/docs/api-documentation/ :
+ *
+ *  - `GET /search?q=&filter=` — `filter` est **obligatoire** ; valeurs utiles ici :
+ *    music_songs, music_videos, videos. Réponse : SearchPage { corrected, items[] },
+ *    où items mêle StreamItem, ChannelItem et PlaylistItem, distingués par `type`.
+ *  - `GET /streams/{videoId}` — VideoInfo, dont `audioStreams: Stream[]`.
+ *    Stream porte url, format, mimeType, codec, bitrate, quality, itag, videoOnly.
+ *
  * Deux avantages sur Invidious pour ce projet :
- *  - un filtre de recherche « music_songs » qui évite le filtrage heuristique côté client ;
- *  - des URLs de flux audio déjà relayées par le proxy Piped, donc avec CORS et Range,
- *    directement exploitables par un <audio> et par fetch() pour la mise en cache.
+ *  - le filtre « music_songs » évite le filtrage heuristique côté client ;
+ *  - les URLs de flux sont déjà relayées par le proxy Piped, donc avec CORS et
+ *    Range, exploitables par un <audio> comme par fetch() pour la mise en cache.
  */
 
 import { fetchFromInstances } from './instances'
@@ -14,6 +24,15 @@ import type { Track } from '../types'
 function videoIdFromUrl(url: string): string {
   const m = (url || '').match(/[?&]v=([\w-]{11})/)
   return m ? m[1] : ''
+}
+
+/**
+ * Une page de résultats mêle vidéos, chaînes et playlists : la spec les
+ * distingue par `type` (« stream », « channel », « playlist »). Seules les
+ * vidéos nous intéressent.
+ */
+function isStreamItem(item: any): boolean {
+  return item?.type === undefined || item.type === 'stream'
 }
 
 function toTrack(item: any): Track | null {
@@ -37,7 +56,10 @@ export async function searchMusic(query: string): Promise<Track[]> {
     { accept: (d) => Array.isArray(d?.items) && d.items.length > 0 },
   )
   const items: any[] = data?.items || []
-  return items.map(toTrack).filter((t): t is Track => t !== null)
+  return items
+    .filter(isStreamItem)
+    .map(toTrack)
+    .filter((t): t is Track => t !== null)
 }
 
 export interface PipedPlaylist {
@@ -105,6 +127,61 @@ export async function getPlaylist(playlistId: string, maxPages = 20): Promise<Pi
 }
 
 /**
+ * Le navigateur sait-il décoder ce flux ?
+ *
+ * Déterminant, et longtemps ignoré ici : YouTube sert la plupart de ses pistes
+ * audio en Opus/WebM, que Safari — donc tout navigateur sur iPhone et iPad — ne
+ * décode pas. Trier les flux par seul débit revenait à choisir presque toujours
+ * un WEBMA_OPUS, injouable sur iOS, alors qu'un M4A/AAC parfaitement lisible
+ * figurait dans la même réponse.
+ */
+function canDecode(stream: any): boolean {
+  const probe = document.createElement('audio')
+  const mime: string | undefined = stream?.mimeType
+  const codec: string | undefined = stream?.codec
+
+  if (mime) {
+    const type = codec ? `${mime}; codecs="${codec}"` : mime
+    const verdict = probe.canPlayType(type)
+    if (verdict) return true
+    // canPlayType('') vaut « non » ; on retente sans le codec, certains
+    // navigateurs refusant une chaîne de codec qu'ils ne connaissent pas.
+    if (codec && probe.canPlayType(mime)) return true
+    return false
+  }
+
+  // Sans mimeType, on se rabat sur le champ `format` de la spec.
+  const byFormat: Record<string, string> = {
+    M4A: 'audio/mp4; codecs="mp4a.40.2"',
+    MPEG_4: 'audio/mp4; codecs="mp4a.40.2"',
+    MP3: 'audio/mpeg',
+    WEBMA: 'audio/webm; codecs="vorbis"',
+    WEBMA_OPUS: 'audio/webm; codecs="opus"',
+    OPUS: 'audio/ogg; codecs="opus"',
+    OGG: 'audio/ogg',
+  }
+  const guess = byFormat[String(stream?.format)]
+  return guess ? !!probe.canPlayType(guess) : true
+}
+
+/**
+ * Meilleur flux audio décodable par ce navigateur, au plus haut débit.
+ * `audioStreams` est censé ne contenir que de l'audio, mais la spec autorise
+ * `videoOnly` sur tout Stream : on l'écarte explicitement.
+ */
+export function pickAudioStream(streams: any[]): any | null {
+  const usable = (streams || []).filter((s) => s?.url && s.videoOnly !== true)
+  if (usable.length === 0) return null
+
+  const byBitrate = [...usable].sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))
+  const decodable = byBitrate.filter(canDecode)
+
+  // Si aucun flux n'est annoncé décodable, on tente quand même le meilleur :
+  // canPlayType est notoirement prudent et répond souvent « maybe » ou vide.
+  return decodable[0] ?? byBitrate[0]
+}
+
+/**
  * URL du meilleur flux audio. Déjà relayée par le proxy Piped : CORS et Range présents.
  *
  * `exclude` porte les origines dont le flux a déjà échoué pour cette piste.
@@ -119,12 +196,9 @@ export async function getAudioStreamUrl(
     { exclude },
   )
 
-  const audioStreams: any[] = (data?.audioStreams || [])
-    .filter((s: any) => s.url)
-    .sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0))
-
-  if (audioStreams.length === 0) {
-    throw new Error('Aucun flux audio disponible via Piped')
+  const stream = pickAudioStream(data?.audioStreams)
+  if (!stream) {
+    throw new Error('aucun flux audio proposé')
   }
-  return { url: audioStreams[0].url, origin: instance.origin }
+  return { url: stream.url, origin: instance.origin }
 }

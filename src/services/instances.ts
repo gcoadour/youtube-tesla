@@ -66,12 +66,30 @@ const COLD_START_INVIDIOUS = [
   'https://invidious.f5.si',
 ]
 
-/** Instances Piped (API). Leurs flux audio sont déjà relayés avec CORS. */
+/** Annuaire Piped officiel, que la documentation demande de parser dynamiquement. */
+const PIPED_INSTANCES_API = 'https://piped-instances.kavin.rocks/'
+
+/**
+ * Instances Piped documentées sur https://docs.piped.video/docs/public-instances/
+ * (relevé le 2026-08-10), utilisées tant que l'annuaire dynamique n'a pas
+ * répondu. Leurs flux audio sont déjà relayés avec CORS.
+ */
 const PIPED_SEEDS = [
   'https://pipedapi.kavin.rocks',
-  'https://pipedapi.adminforge.de',
+  'https://pipedapi.leptons.xyz',
   'https://pipedapi.nosebs.ru',
+  'https://pipedapi-libre.kavin.rocks',
+  'https://piped-api.privacy.com.de',
+  'https://pipedapi.adminforge.de',
+  'https://api.piped.yt',
+  'https://pipedapi.drgns.space',
+  'https://pipedapi.owo.si',
+  'https://pipedapi.ducks.party',
+  'https://piped-api.codespace.cz',
+  'https://pipedapi.reallyaweso.me',
   'https://api.piped.private.coffee',
+  'https://pipedapi.darkness.services',
+  'https://pipedapi.orangenet.cc',
 ]
 
 function apiUrlFor(kind: InstanceKind, origin: string): string {
@@ -268,6 +286,40 @@ async function refreshFromApi(): Promise<void> {
   lastApiFetch = Date.now()
 }
 
+/**
+ * Récupère l'annuaire Piped.
+ *
+ * La documentation officielle demande explicitement de parser cette liste
+ * dynamiquement plutôt que de la figer : les instances Piped changent
+ * fréquemment, et une liste en dur périme vite. Les instances documentées
+ * restent le repli si l'annuaire ne répond pas.
+ */
+async function refreshPipedFromApi(): Promise<void> {
+  const res = await fetchWithTimeout(PIPED_INSTANCES_API)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+
+  const data = await res.json()
+  if (!Array.isArray(data) || data.length === 0) throw new Error('Réponse vide')
+
+  const known = new Set(instances.filter((i) => i.kind === 'piped').map((i) => i.origin))
+  let added = 0
+
+  for (const entry of data) {
+    const apiUrl: string | undefined = entry?.api_url
+    if (!apiUrl || !/^https:\/\//.test(apiUrl)) continue
+    const origin = apiUrl.replace(/\/+$/, '')
+    if (known.has(origin)) continue
+    known.add(origin)
+    instances.push(makeInstance('piped', origin))
+    added++
+  }
+
+  if (added > 0) {
+    sortInstances()
+    persist()
+  }
+}
+
 // --- health-check Piped ------------------------------------------------------
 
 async function checkPiped(inst: Instance): Promise<void> {
@@ -311,7 +363,13 @@ export function checkInstances(force = false): Promise<void> {
   }
   if (pipedStale) {
     lastPipedCheck = now
-    jobs.push(Promise.all(instances.filter((i) => i.kind === 'piped').map(checkPiped)))
+    jobs.push(
+      // L'annuaire d'abord : les instances qu'il ajoute sont vérifiées dans la
+      // foulée, faute de quoi elles resteraient marquées « non vérifiée ».
+      refreshPipedFromApi()
+        .catch(() => {})
+        .then(() => Promise.all(instances.filter((i) => i.kind === 'piped').map(checkPiped))),
+    )
   }
 
   refreshPromise = Promise.all(jobs)

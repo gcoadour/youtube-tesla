@@ -7,14 +7,18 @@ const SEARCH_PAYLOAD = [
   { videoId: 'dQw4w9WgXcQ', title: 'Servi par le relais', author: 'Artiste', lengthSeconds: 200 },
 ]
 
-/** Coupe tout accès direct aux API d'instances, sans toucher aux flux. */
+/**
+ * Coupe tout accès direct aux API d'instances, sans toucher aux flux ni aux
+ * relais. Exprimé par prédicat plutôt que par liste d'hôtes : les instances
+ * Piped viennent d'un annuaire dynamique, les énumérer serait fragile.
+ */
 async function breakDirectApis(page: Page) {
-  for (const host of ['inv-a', 'inv-b', 'inv-c', 'nocors']) {
-    await page.route(`**/${host}.test/api/v1/**`, (route) => route.abort('failed'))
-  }
-  for (const host of ['pipedapi.kavin.rocks', 'pipedapi.adminforge.de', 'pipedapi.nosebs.ru', 'api.piped.private.coffee']) {
-    await page.route(`**/${host}/search**`, (route) => route.abort('failed'))
-  }
+  await page.route(
+    (url) =>
+      url.pathname.includes('/api/v1/') ||
+      /^\/(search|streams)\b/.test(url.pathname),
+    (route) => route.abort('failed'),
+  )
 }
 
 test.describe('Relais CORS', () => {
