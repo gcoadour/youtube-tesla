@@ -12,11 +12,30 @@
  *    nous refuse : c'est même le cas le plus fréquent aujourd'hui.
  */
 
-import { getInstances, audioProbeTimeout } from './instances'
+import { getInstances } from './instances'
 import type { Instance } from './instances'
 import { audioUrlFor } from './invidious'
 import { pickAudioStream } from './piped'
 import { proxyVariants } from './corsProxy'
+
+/**
+ * Délai par tentative, volontairement plus court que celui de la lecture.
+ *
+ * Un diagnostic doit rendre un verdict vite : chaque capacité vaut jusqu'à deux
+ * tentatives (direct puis relais), et il y a trois capacités par instance.
+ */
+const PROBE_TIMEOUT = 4000
+
+/**
+ * Un seul relais essayé lors du diagnostic, là où la lecture en essaie
+ * plusieurs. En tester trois multipliait la durée par quatre pour une
+ * information quasi identique : si le premier relais échoue, c'est presque
+ * toujours l'instance qui est en cause, pas le relais.
+ */
+const DIAGNOSTIC_PROXY_ATTEMPTS = 1
+
+/** Nombre d'instances testées, les mieux classées d'abord. */
+const DEFAULT_MAX_INSTANCES = 10
 
 /** Vidéo de référence, publique et stable, utilisée comme témoin. */
 const PROBE_VIDEO_ID = 'dQw4w9WgXcQ'
@@ -93,7 +112,7 @@ async function fetchJsonOnce(
   accept: (data: any) => boolean,
 ): Promise<{ ok: boolean; detail: string }> {
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), audioProbeTimeout)
+  const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT)
   try {
     const res = await fetch(url, { signal: controller.signal })
     if (!res.ok) return { ok: false, detail: `${label} HTTP ${res.status}` }
@@ -139,7 +158,7 @@ async function probeJson(
   const direct = await fetchJsonOnce(`${instance.apiUrl}${path}`, label, accept)
   if (direct.ok) return { ...direct, viaProxy: false }
 
-  for (const { proxy, url } of proxyVariants(`${instance.apiUrl}${path}`)) {
+  for (const { proxy, url } of proxyVariants(`${instance.apiUrl}${path}`).slice(0, DIAGNOSTIC_PROXY_ATTEMPTS)) {
     const relayed = await fetchJsonOnce(url, label, accept)
     if (relayed.ok) {
       return { ok: true, viaProxy: true, detail: `${label} via ${proxy.label}` }
@@ -187,15 +206,15 @@ async function probeStream(
   if (instance.kind === 'invidious') {
     const url = audioUrlFor(instance.origin, PROBE_VIDEO_ID)
 
-    if (await canPlay(audio, url, audioProbeTimeout)) {
+    if (await canPlay(audio, url, PROBE_TIMEOUT)) {
       return { ok: true, viaProxy: false, detail: '' }
     }
 
     // Un flux lu par <audio> n'est pas soumis au CORS : s'il échoue en direct,
     // c'est l'instance qui ne relaie plus rien. Le relais peut malgré tout
     // aboutir, en attaquant depuis une autre IP et sans en-tête Origin.
-    for (const { proxy, url: relayed } of proxyVariants(url)) {
-      if (await canPlay(audio, relayed, audioProbeTimeout)) {
+    for (const { proxy, url: relayed } of proxyVariants(url).slice(0, DIAGNOSTIC_PROXY_ATTEMPTS)) {
+      if (await canPlay(audio, relayed, PROBE_TIMEOUT)) {
         return { ok: true, viaProxy: true, detail: `flux via ${proxy.label}` }
       }
     }
@@ -213,11 +232,11 @@ async function probeStream(
     const stream = pickAudioStream(data?.audioStreams)
     if (!stream) return { ok: false, viaProxy: false, detail: 'aucun flux audio proposé' }
 
-    if (await canPlay(audio, stream.url, audioProbeTimeout)) {
+    if (await canPlay(audio, stream.url, PROBE_TIMEOUT)) {
       return { ok: true, viaProxy: false, detail: '' }
     }
-    for (const { proxy, url: relayed } of proxyVariants(stream.url)) {
-      if (await canPlay(audio, relayed, audioProbeTimeout)) {
+    for (const { proxy, url: relayed } of proxyVariants(stream.url).slice(0, DIAGNOSTIC_PROXY_ATTEMPTS)) {
+      if (await canPlay(audio, relayed, PROBE_TIMEOUT)) {
         return { ok: true, viaProxy: true, detail: `flux via ${proxy.label}` }
       }
     }
@@ -240,43 +259,52 @@ async function probeStream(
  * une dizaine d'instances lentes, attendre la fin donnerait l'impression d'une
  * application figée.
  */
+export interface DiagnoseOptions {
+  /** Interrompt le test entre deux instances. */
+  signal?: AbortSignal
+  /** Instances testées, les mieux classées d'abord. */
+  maxInstances?: number
+  /** Nombre total d'instances qui seront testées, connu avant le premier résultat. */
+  onTotal?: (total: number) => void
+}
+
+/**
+ * Teste les instances **une par une**, en publiant chaque verdict dès qu'il est
+ * connu.
+ *
+ * La version précédente traitait toutes les instances en deux phases globales :
+ * rien ne s'affichait tant que la phase JSON n'était pas terminée sur
+ * l'ensemble des instances, soit plusieurs minutes de silence complet une fois
+ * le repli par relais ajouté. Séquentiel et progressif vaut mieux ici : la
+ * première ligne tombe en quelques secondes, et l'utilisateur peut arrêter.
+ *
+ * Les deux sondes JSON d'une même instance restent parallèles — elles ne se
+ * gênent pas — tandis que la sonde de flux est nécessairement sérialisée : elle
+ * partage l'unique élément audio autorisé par le geste de l'utilisateur.
+ */
 export async function diagnoseInstances(
   probeAudio: HTMLAudioElement,
   onResult: (result: InstanceDiagnostic) => void,
-  apiConcurrency = 3,
+  options: DiagnoseOptions = {},
 ): Promise<void> {
-  const queue = getInstances()
-  if (queue.length === 0) return
-
-  const apiResults = new Map<string, Probe>()
-  const searchResults = new Map<string, Probe>()
-  let cursor = 0
-
-  const apiWorker = async () => {
-    while (cursor < queue.length) {
-      const instance = queue[cursor++]
-      const [api, search] = await Promise.all([
-        probeApi(instance).catch(() => ({ ok: false, viaProxy: false, detail: 'API : échec inattendu' })),
-        probeSearch(instance).catch(() => ({ ok: false, viaProxy: false, detail: 'Recherche : échec inattendu' })),
-      ])
-      apiResults.set(instance.origin, api)
-      searchResults.set(instance.origin, search)
-    }
-  }
-
-  await Promise.all(Array.from({ length: Math.min(apiConcurrency, queue.length) }, apiWorker))
+  const queue = getInstances().slice(0, options.maxInstances ?? DEFAULT_MAX_INSTANCES)
+  options.onTotal?.(queue.length)
 
   for (const instance of queue) {
-    const api = apiResults.get(instance.origin)
-      ?? { ok: false, viaProxy: false, detail: 'API : non testée' }
-    const search = searchResults.get(instance.origin)
-      ?? { ok: false, viaProxy: false, detail: '' }
+    if (options.signal?.aborted) return
+
+    const [api, search] = await Promise.all([
+      probeApi(instance).catch(() => failed('API')),
+      probeSearch(instance).catch(() => failed('Recherche')),
+    ])
+
+    if (options.signal?.aborted) return
 
     let stream: Probe
     try {
       stream = await probeStream(probeAudio, instance, api)
     } catch {
-      stream = { ok: false, viaProxy: false, detail: 'flux : échec inattendu' }
+      stream = failed('Flux')
     }
 
     const notes = [api.detail, search.detail, stream.detail].filter(Boolean)
@@ -290,4 +318,8 @@ export async function diagnoseInstances(
       detail: allOk ? 'tout fonctionne' : notes.join(' — ') || 'échec',
     })
   }
+}
+
+function failed(label: string): Probe {
+  return { ok: false, viaProxy: false, detail: `${label} : échec inattendu` }
 }

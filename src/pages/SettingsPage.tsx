@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { getCacheInfo, getAllCachedTracks, deleteAudio, clearCache } from '../services/audioCache'
 import {
   getInstances, checkInstances, addUserInstance, removeUserInstance, prioritizeInstance,
@@ -57,6 +57,8 @@ export default function SettingsPage() {
 
   const [diagnostics, setDiagnostics] = useState<InstanceDiagnostic[]>([])
   const [diagnosing, setDiagnosing] = useState(false)
+  const [diagnosticTotal, setDiagnosticTotal] = useState(0)
+  const diagnosticAbort = useRef<AbortController | null>(null)
 
   const [newOrigin, setNewOrigin] = useState('')
   const [newKind, setNewKind] = useState<InstanceKind>('invidious')
@@ -107,17 +109,27 @@ export default function SettingsPage() {
     // Créé et déverrouillé de façon synchrone, dans le geste de clic : sur iOS
     // c'est la seule fenêtre où un élément média obtient le droit de charger.
     const probe = createPrimedProbe()
+    const controller = new AbortController()
+    diagnosticAbort.current = controller
 
     setDiagnosing(true)
     setDiagnostics([])
+    setDiagnosticTotal(0)
     try {
-      await diagnoseInstances(probe, (result) => setDiagnostics((prev) => [...prev, result]))
+      await diagnoseInstances(
+        probe,
+        (result) => setDiagnostics((prev) => [...prev, result]),
+        { signal: controller.signal, onTotal: setDiagnosticTotal },
+      )
     } finally {
       setDiagnosing(false)
+      diagnosticAbort.current = null
       probe.removeAttribute('src')
       probe.load()
     }
   }
+
+  const handleStopDiagnose = () => diagnosticAbort.current?.abort()
 
   const handleAddInstance = () => {
     setInstanceError('')
@@ -189,9 +201,11 @@ export default function SettingsPage() {
           <button className="btn-secondary" onClick={handleCheckInstances} disabled={checking}>
             {checking ? 'Actualisation…' : 'Actualiser la liste'}
           </button>
-          <button className="btn-secondary" onClick={handleDiagnose} disabled={diagnosing}>
-            {diagnosing ? 'Test en cours…' : 'Tester les instances'}
-          </button>
+          {diagnosing ? (
+            <button className="btn-secondary" onClick={handleStopDiagnose}>Arrêter le test</button>
+          ) : (
+            <button className="btn-secondary" onClick={handleDiagnose}>Tester les instances</button>
+          )}
           <span className="settings-desc" style={{ margin: 0 }}>
             {instances.filter((i) => i.kind === 'invidious').length} Invidious ·{' '}
             {instances.filter((i) => i.kind === 'piped').length} Piped
@@ -235,7 +249,7 @@ export default function SettingsPage() {
               {diagnosing && (
                 <div className="search-status">
                   <span className="spinner" />
-                  <span>{diagnostics.length} / {instances.length} instances testées…</span>
+                  <span>{diagnostics.length} / {diagnosticTotal || '…'} instances testées…</span>
                 </div>
               )}
             </div>

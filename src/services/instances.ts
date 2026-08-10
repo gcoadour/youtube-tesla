@@ -17,9 +17,6 @@ const INSTANCES_API = 'https://api.invidious.io/instances.json'
 const STORAGE_KEY = 'yt-instances'
 const REFRESH_INTERVAL = 30 * 60 * 1000 // 30 minutes
 const REQUEST_TIMEOUT = 6000
-
-/** Délai laissé à une instance pour prouver qu'elle répond (diagnostic inclus). */
-export const audioProbeTimeout = 8000
 const DEFAULT_SCORE = 50
 
 export type InstanceKind = 'invidious' | 'piped'

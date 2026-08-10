@@ -238,4 +238,36 @@ test.describe('Diagnostic des instances', () => {
     await expect(rowA.locator('.probe', { hasText: 'API' })).toHaveClass(/relay/, { timeout: 40_000 })
     await expect(rowA.locator('.probe', { hasText: 'API' })).toContainText('relais')
   })
+
+  test('le premier verdict arrive vite, même quand tout échoue', async ({ page }) => {
+    // Tout est injoignable et lent : c'est le cas qui avait rendu le test
+    // inutilisable, la phase JSON s'exécutant en entier avant le moindre
+    // affichage. Un verdict doit désormais tomber en quelques secondes.
+    await page.route(/inv-|piped|allorigins|codetabs|corsproxy/, (route) =>
+      route.abort('timedout'),
+    )
+
+    await page.goto(`${BASE}/settings`)
+    const started = Date.now()
+    await page.getByRole('button', { name: 'Tester les instances' }).click()
+
+    await expect(page.locator('.diagnostic-block .instance-item').first()).toBeVisible({
+      timeout: 30_000,
+    })
+    expect(Date.now() - started, 'premier verdict trop lent').toBeLessThan(30_000)
+  })
+
+  test('le test est interruptible', async ({ page }) => {
+    await page.route(/inv-|piped|allorigins|codetabs|corsproxy/, (route) => route.abort('timedout'))
+
+    await page.goto(`${BASE}/settings`)
+    await page.getByRole('button', { name: 'Tester les instances' }).click()
+    await expect(page.getByRole('button', { name: 'Arrêter le test' })).toBeVisible()
+
+    await page.getByRole('button', { name: 'Arrêter le test' }).click()
+    // Le bouton redevient disponible : la boucle s'est réellement arrêtée.
+    await expect(page.getByRole('button', { name: 'Tester les instances' })).toBeVisible({
+      timeout: 30_000,
+    })
+  })
 })
