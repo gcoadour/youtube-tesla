@@ -151,7 +151,16 @@ export function instancesDirectory() {
   return [
     entry('inv-a.test', 99),
     entry('inv-b.test', 98),
-    entry('inv-c.test', 97),
+    // Capacité CORS inconnue : l'annuaire renvoie très souvent un champ nul.
+    // Elle doit rester utilisable pour les appels d'API.
+    ['inv-c.test', {
+      uri: 'https://inv-c.test',
+      type: 'https',
+      api: true,
+      cors: null,
+      monitor: { uptime: 97 },
+      stats: { playback: { ratio: 0.9 } },
+    }],
     // Écartées à la lecture de l'annuaire : injoignables ou inutilisables
     // depuis un navigateur.
     ['onion.test', { uri: 'http://onion.test', type: 'onion', api: true, cors: true }],

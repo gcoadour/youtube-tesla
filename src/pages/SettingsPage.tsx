@@ -191,6 +191,11 @@ export default function SettingsPage() {
               et « Flux » sert la lecture, qui n'est pas soumise au CORS. Priorisez une instance
               dont la colonne qui vous manque répond.
             </p>
+            <p className="settings-desc">
+              Une instance peut très bien s'ouvrir dans un onglet et rester inutilisable ici :
+              les instances publiques doivent déployer un dispositif anti-bot, qui renvoie une
+              page de défi au lieu du JSON attendu. Le détail de chaque ligne le précise.
+            </p>
             <div className="instance-list">
               {diagnostics.map((d) => (
                 <div key={d.origin} className="instance-item">
@@ -213,6 +218,7 @@ export default function SettingsPage() {
                   >
                     <ArrowUpIcon size={22} />
                   </button>
+                  <span className="probe-detail">{d.detail}</span>
                 </div>
               ))}
               {diagnosing && (

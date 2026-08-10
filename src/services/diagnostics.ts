@@ -84,7 +84,17 @@ async function probeJson(
   try {
     const res = await fetch(`${instance.apiUrl}${path}`, { signal: controller.signal })
     if (!res.ok) return { ok: false, detail: `${label} HTTP ${res.status}` }
-    const data = await res.json()
+
+    // Un corps non-JSON en 200 est la signature d'un dispositif anti-bot, que
+    // la liste officielle impose désormais à toute instance publique : la
+    // réponse est une page de défi, pas une panne.
+    let data: any
+    try {
+      data = await res.json()
+    } catch {
+      return { ok: false, detail: `${label} : page de défi anti-bot` }
+    }
+
     if (data?.error) return { ok: false, detail: `${label} : ${String(data.error)}` }
     if (!accept(data)) return { ok: false, detail: `${label} : réponse vide` }
     return { ok: true, detail: '' }

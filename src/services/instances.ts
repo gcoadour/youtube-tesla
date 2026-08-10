@@ -31,14 +31,20 @@ export interface Instance {
   score: number
   penalizedUntil: number
   /**
-   * L'instance annonce `Access-Control-Allow-Origin`.
+   * Capacité CORS déclarée par l'annuaire, en **trois états** :
+   * `true` (annoncée), `false` (explicitement absente), `undefined` (inconnue).
    *
-   * Déterminant : un appel JSON depuis le navigateur (recherche, import) est
-   * impossible sans, tandis qu'un flux audio consommé par <audio> n'y est pas
-   * soumis. Une instance sans CORS reste donc utile à la lecture, mais ne doit
-   * jamais être essayée pour une requête d'API — c'est du temps perdu.
+   * La distinction est capitale. L'annuaire renvoie aujourd'hui très souvent un
+   * champ nul, faute de monitoring à jour. Traiter cet « inconnu » comme un
+   * refus revenait à exclure toutes les instances Invidious des appels d'API et
+   * à ne laisser que Piped. Seul un `false` explicite écarte une instance ; dans
+   * le doute on essaie, et l'échec éventuel la pénalise comme n'importe quel
+   * autre.
+   *
+   * Un flux audio lu par <audio> n'est de toute façon pas soumis au CORS : ce
+   * champ ne concerne que les appels JSON.
    */
-  cors: boolean
+  cors?: boolean
   /** true tant qu'aucune vérification n'a eu lieu */
   unverified: boolean
   /** Ajoutée à la main : jamais retirée par un rafraîchissement */
@@ -74,7 +80,7 @@ function makeInstance(
   kind: InstanceKind,
   origin: string,
   userAdded = false,
-  cors = true,
+  cors?: boolean,
 ): Instance {
   const clean = origin.replace(/\/+$/, '')
   return {
@@ -119,7 +125,8 @@ interface StoredInstance {
   origin: string
   score: number
   userAdded: boolean
-  cors?: boolean
+  /** null = inconnu (undefined ne survit pas à JSON.stringify). */
+  cors?: boolean | null
 }
 
 function persist(): void {
@@ -129,7 +136,7 @@ function persist(): void {
       origin: i.origin,
       score: i.score,
       userAdded: i.userAdded,
-      cors: i.cors,
+      cors: i.cors ?? null,
     }))
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
   } catch {
@@ -150,7 +157,12 @@ function load(): void {
   for (const s of stored) {
     if (!s?.origin || (s.kind !== 'invidious' && s.kind !== 'piped')) continue
     byOrigin.set(s.origin, {
-      ...makeInstance(s.kind, s.origin, !!s.userAdded, s.cors !== false),
+      ...makeInstance(
+        s.kind,
+        s.origin,
+        !!s.userAdded,
+        s.cors === null || s.cors === undefined ? undefined : s.cors,
+      ),
       score: typeof s.score === 'number' ? s.score : DEFAULT_SCORE,
     })
   }
@@ -222,7 +234,12 @@ async function refreshFromApi(): Promise<void> {
     // Les instances sans CORS ne sont plus écartées, mais marquées : elles
     // restent bonnes pour la lecture, et sont exclues des appels d'API.
     discovered.push({
-      ...makeInstance('invidious', info.uri, false, info.cors === true),
+      ...makeInstance(
+        'invidious',
+        info.uri,
+        false,
+        info.cors === true ? true : info.cors === false ? false : undefined,
+      ),
       score: scoreFromApi(info),
       unverified: false,
     })
@@ -316,9 +333,9 @@ export function getInstances(kind?: InstanceKind): Instance[] {
 /**
  * Instances utilisables d'une famille, les mieux classées d'abord.
  *
- * `corsOnly` restreint aux instances capables de servir un appel JSON depuis le
- * navigateur. Sans ce filtre, une recherche essaie des instances qui ne peuvent
- * structurellement pas répondre, et l'attente est pure perte.
+ * `corsOnly` écarte les instances dont l'annuaire indique explicitement qu'elles
+ * ne servent pas le CORS : les interroger pour un appel JSON est du temps perdu.
+ * Une capacité inconnue reste éligible — voir le champ `cors`.
  *
  * Si toutes les instances retenues sont pénalisées, on les rend quand même :
  * mieux vaut retenter que refuser la requête.
@@ -329,7 +346,7 @@ export function getAvailableInstances(
 ): Instance[] {
   const now = Date.now()
   const eligible = instances.filter(
-    (i) => i.kind === kind && (!options.corsOnly || i.cors),
+    (i) => i.kind === kind && (!options.corsOnly || i.cors !== false),
   )
   const usable = eligible.filter((i) => i.penalizedUntil < now)
   return usable.length > 0 ? usable : eligible
@@ -463,7 +480,22 @@ export async function fetchFromInstances(
         continue
       }
 
-      const data = await res.json()
+      /*
+       * La liste officielle impose désormais aux instances publiques un
+       * dispositif anti-bot (règle 14). Une requête inter-origine sans défi
+       * résolu reçoit donc souvent une page HTML en 200, et non du JSON. Le
+       * signaler comme tel évite de faire passer un blocage anti-bot pour une
+       * panne d'instance.
+       */
+      let data: any
+      try {
+        data = await res.json()
+      } catch {
+        penalizeInstance(instance.origin)
+        failures.push(`${host} : réponse non-JSON (défi anti-bot ?)`)
+        continue
+      }
+
       if (data?.error) {
         // L'instance répond mais ne peut pas servir cette ressource (playlist
         // privée, vidéo bloquée). Pénalité courte : la faute n'est pas la sienne.

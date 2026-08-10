@@ -80,6 +80,57 @@ test.describe('Annuaire et rotation des instances', () => {
     expect(seen).toEqual(['inv-a', 'inv-b'])
   })
 
+  test('une capacité CORS inconnue reste utilisable pour les appels API', async ({ page }) => {
+    let inv3Queried = false
+
+    // inv-a et inv-b tombent : la cascade doit atteindre inv-c, dont l'annuaire
+    // ne déclare pas la capacité CORS. La traiter comme un refus excluait toutes
+    // les instances Invidious et ne laissait que Piped.
+    for (const host of ['inv-a', 'inv-b']) {
+      await page.route(`**/${host}.test/api/v1/search**`, (route) =>
+        route.fulfill({ status: 500, body: '' }),
+      )
+    }
+    await page.route('**/inv-c.test/api/v1/search**', (route) => {
+      inv3Queried = true
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          { videoId: 'dQw4w9WgXcQ', title: 'Servi par inv-c', author: 'Artiste', lengthSeconds: 200 },
+        ]),
+      })
+    })
+
+    await page.goto(`${BASE}/search`)
+    await page.locator('.search-input').fill('Rick Astley')
+
+    await expect(page.locator('.col-title')).toContainText('Servi par inv-c', { timeout: 25_000 })
+    expect(inv3Queried).toBe(true)
+  })
+
+  test('une page de défi anti-bot fait passer à l\'instance suivante', async ({ page }) => {
+    // Réponse 200 mais HTML : signature du dispositif anti-bot que la liste
+    // officielle impose aux instances publiques. Ce n'est pas du JSON, donc pas
+    // exploitable — et surtout, ce n'est pas une raison de clore la cascade.
+    await page.route('**/inv-a.test/api/v1/search**', (route) =>
+      route.fulfill({ status: 200, contentType: 'text/html', body: '<html>Just a moment…</html>' }),
+    )
+    await page.route('**/inv-b.test/api/v1/search**', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          { videoId: 'dQw4w9WgXcQ', title: 'Reprise après défi', author: 'Artiste', lengthSeconds: 200 },
+        ]),
+      }),
+    )
+
+    await page.goto(`${BASE}/search`)
+    await page.locator('.search-input').fill('Rick Astley')
+    await expect(page.locator('.col-title')).toContainText('Reprise après défi', { timeout: 25_000 })
+  })
+
   test("un flux audio en échec repart sur l'instance suivante, pas sur Piped", async ({ page }) => {
     // inv-a sert les métadonnées mais son flux échoue : c'est le cas typique
     // d'une instance vivante dont le relais est bloqué par YouTube.

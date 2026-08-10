@@ -660,3 +660,11 @@
   .instance-origin { flex: 1 1 100%; order: -1; }
   .diagnostic-block { padding: 12px; }
 }
+
+/* Détail d'un verdict de diagnostic : sur une ligne à part, il porte la cause
+   réelle (défi anti-bot, CORS, HTTP) qui décide de l'action à mener. */
+.probe-detail {
+  flex: 1 1 100%;
+  font-size: var(--fs-label);
+  color: var(--text-subtle);
+}
