@@ -15,6 +15,8 @@
 import { getInstances, audioProbeTimeout } from './instances'
 import type { Instance } from './instances'
 import { audioUrlFor } from './invidious'
+import { pickAudioStream } from './piped'
+import { proxyVariants } from './corsProxy'
 
 /** Vidéo de référence, publique et stable, utilisée comme témoin. */
 const PROBE_VIDEO_ID = 'dQw4w9WgXcQ'
@@ -22,7 +24,8 @@ const PROBE_VIDEO_ID = 'dQw4w9WgXcQ'
 /** Requête témoin : assez banale pour qu'une recherche saine renvoie forcément quelque chose. */
 const PROBE_QUERY = 'music'
 
-export type ProbeResult = 'ok' | 'ko'
+/** « proxy » : inaccessible en direct, mais joignable via un relais CORS. */
+export type ProbeResult = 'ok' | 'proxy' | 'ko'
 
 export interface InstanceDiagnostic {
   origin: string
@@ -31,6 +34,17 @@ export interface InstanceDiagnostic {
   search: ProbeResult
   stream: ProbeResult
   detail: string
+}
+
+interface Probe {
+  ok: boolean
+  viaProxy: boolean
+  detail: string
+}
+
+function verdict(probe: Probe): ProbeResult {
+  if (!probe.ok) return 'ko'
+  return probe.viaProxy ? 'proxy' : 'ok'
 }
 
 /**
@@ -73,16 +87,15 @@ function canPlay(audio: HTMLAudioElement, url: string, timeoutMs: number): Promi
   })
 }
 
-async function probeJson(
-  instance: Instance,
-  path: string,
+async function fetchJsonOnce(
+  url: string,
   label: string,
-  accept: (data: any) => boolean = () => true,
+  accept: (data: any) => boolean,
 ): Promise<{ ok: boolean; detail: string }> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), audioProbeTimeout)
   try {
-    const res = await fetch(`${instance.apiUrl}${path}`, { signal: controller.signal })
+    const res = await fetch(url, { signal: controller.signal })
     if (!res.ok) return { ok: false, detail: `${label} HTTP ${res.status}` }
 
     // Un corps non-JSON en 200 est la signature d'un dispositif anti-bot, que
@@ -107,6 +120,33 @@ async function probeJson(
   } finally {
     clearTimeout(timer)
   }
+}
+
+/**
+ * Teste un appel JSON tel que l'application le fait réellement : direct, puis
+ * relais CORS en secours.
+ *
+ * Sans cette seconde passe, le diagnostic annonçait « bloquée (CORS) » là où
+ * l'application, elle, passait par le relais et fonctionnait — un verdict plus
+ * pessimiste que la réalité, donc trompeur.
+ */
+async function probeJson(
+  instance: Instance,
+  path: string,
+  label: string,
+  accept: (data: any) => boolean = () => true,
+): Promise<Probe> {
+  const direct = await fetchJsonOnce(`${instance.apiUrl}${path}`, label, accept)
+  if (direct.ok) return { ...direct, viaProxy: false }
+
+  for (const { proxy, url } of proxyVariants(`${instance.apiUrl}${path}`)) {
+    const relayed = await fetchJsonOnce(url, label, accept)
+    if (relayed.ok) {
+      return { ok: true, viaProxy: true, detail: `${label} via ${proxy.label}` }
+    }
+  }
+
+  return { ...direct, viaProxy: false }
 }
 
 function probeApi(instance: Instance) {
@@ -142,28 +182,48 @@ function probeSearch(instance: Instance) {
 async function probeStream(
   audio: HTMLAudioElement,
   instance: Instance,
-  apiData: { ok: boolean },
-): Promise<{ ok: boolean; detail: string }> {
+  apiData: Probe,
+): Promise<Probe> {
   if (instance.kind === 'invidious') {
-    const ok = await canPlay(audio, audioUrlFor(instance.origin, PROBE_VIDEO_ID), audioProbeTimeout)
-    return { ok, detail: ok ? '' : 'flux injoignable' }
+    const url = audioUrlFor(instance.origin, PROBE_VIDEO_ID)
+
+    if (await canPlay(audio, url, audioProbeTimeout)) {
+      return { ok: true, viaProxy: false, detail: '' }
+    }
+
+    // Un flux lu par <audio> n'est pas soumis au CORS : s'il échoue en direct,
+    // c'est l'instance qui ne relaie plus rien. Le relais peut malgré tout
+    // aboutir, en attaquant depuis une autre IP et sans en-tête Origin.
+    for (const { proxy, url: relayed } of proxyVariants(url)) {
+      if (await canPlay(audio, relayed, audioProbeTimeout)) {
+        return { ok: true, viaProxy: true, detail: `flux via ${proxy.label}` }
+      }
+    }
+
+    return { ok: false, viaProxy: false, detail: 'flux injoignable' }
   }
 
   // Piped ne publie l'URL de son flux que via son API : si l'API est muette,
   // le flux est hors de portée, sans que cela dise quoi que ce soit du relais.
-  if (!apiData.ok) return { ok: false, detail: 'flux non testable sans son API' }
+  if (!apiData.ok) return { ok: false, viaProxy: false, detail: 'flux non testable sans son API' }
 
   try {
     const res = await fetch(`${instance.apiUrl}/streams/${PROBE_VIDEO_ID}`)
     const data = await res.json()
-    const stream = (data?.audioStreams || [])
-      .filter((s: any) => s.url)
-      .sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0))[0]
-    if (!stream) return { ok: false, detail: 'aucun flux audio proposé' }
-    const ok = await canPlay(audio, stream.url, audioProbeTimeout)
-    return { ok, detail: ok ? '' : 'flux injoignable' }
+    const stream = pickAudioStream(data?.audioStreams)
+    if (!stream) return { ok: false, viaProxy: false, detail: 'aucun flux audio proposé' }
+
+    if (await canPlay(audio, stream.url, audioProbeTimeout)) {
+      return { ok: true, viaProxy: false, detail: '' }
+    }
+    for (const { proxy, url: relayed } of proxyVariants(stream.url)) {
+      if (await canPlay(audio, relayed, audioProbeTimeout)) {
+        return { ok: true, viaProxy: true, detail: `flux via ${proxy.label}` }
+      }
+    }
+    return { ok: false, viaProxy: false, detail: 'flux injoignable' }
   } catch {
-    return { ok: false, detail: 'flux injoignable' }
+    return { ok: false, viaProxy: false, detail: 'flux injoignable' }
   }
 }
 
@@ -188,16 +248,16 @@ export async function diagnoseInstances(
   const queue = getInstances()
   if (queue.length === 0) return
 
-  const apiResults = new Map<string, { ok: boolean; detail: string }>()
-  const searchResults = new Map<string, { ok: boolean; detail: string }>()
+  const apiResults = new Map<string, Probe>()
+  const searchResults = new Map<string, Probe>()
   let cursor = 0
 
   const apiWorker = async () => {
     while (cursor < queue.length) {
       const instance = queue[cursor++]
       const [api, search] = await Promise.all([
-        probeApi(instance).catch(() => ({ ok: false, detail: 'API : échec inattendu' })),
-        probeSearch(instance).catch(() => ({ ok: false, detail: 'Recherche : échec inattendu' })),
+        probeApi(instance).catch(() => ({ ok: false, viaProxy: false, detail: 'API : échec inattendu' })),
+        probeSearch(instance).catch(() => ({ ok: false, viaProxy: false, detail: 'Recherche : échec inattendu' })),
       ])
       apiResults.set(instance.origin, api)
       searchResults.set(instance.origin, search)
@@ -207,13 +267,16 @@ export async function diagnoseInstances(
   await Promise.all(Array.from({ length: Math.min(apiConcurrency, queue.length) }, apiWorker))
 
   for (const instance of queue) {
-    const api = apiResults.get(instance.origin) ?? { ok: false, detail: 'API : non testée' }
-    const search = searchResults.get(instance.origin) ?? { ok: false, detail: '' }
-    let stream: { ok: boolean; detail: string }
+    const api = apiResults.get(instance.origin)
+      ?? { ok: false, viaProxy: false, detail: 'API : non testée' }
+    const search = searchResults.get(instance.origin)
+      ?? { ok: false, viaProxy: false, detail: '' }
+
+    let stream: Probe
     try {
       stream = await probeStream(probeAudio, instance, api)
     } catch {
-      stream = { ok: false, detail: 'flux : échec inattendu' }
+      stream = { ok: false, viaProxy: false, detail: 'flux : échec inattendu' }
     }
 
     const notes = [api.detail, search.detail, stream.detail].filter(Boolean)
@@ -221,9 +284,9 @@ export async function diagnoseInstances(
     onResult({
       origin: instance.origin,
       kind: instance.kind,
-      api: api.ok ? 'ok' : 'ko',
-      search: search.ok ? 'ok' : 'ko',
-      stream: stream.ok ? 'ok' : 'ko',
+      api: verdict(api),
+      search: verdict(search),
+      stream: verdict(stream),
       detail: allOk ? 'tout fonctionne' : notes.join(' — ') || 'échec',
     })
   }

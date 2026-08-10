@@ -668,3 +668,6 @@
   font-size: var(--fs-label);
   color: var(--text-subtle);
 }
+
+/* Capacité obtenue seulement via un relais : ni un succès franc, ni un échec. */
+.probe.relay { color: var(--warning); }

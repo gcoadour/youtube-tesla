@@ -218,4 +218,24 @@ test.describe('Diagnostic des instances', () => {
     // La recherche a son propre verdict : une API saine n'en dit rien.
     await expect(rowB.locator('.probe', { hasText: 'Recherche' })).toBeVisible()
   })
+
+  test('une capacité obtenue via relais est signalée comme telle', async ({ page }) => {
+    // Direct refusé partout, relais fonctionnel : le diagnostic doit annoncer
+    // « ✓ relais » et non « ✗ ». Il suit ainsi le chemin réel de l'application.
+    await page.route('**/inv-a.test/api/v1/**', (route) => route.abort('failed'))
+    await page.route('**/api.allorigins.win/**', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([{ videoId: 'dQw4w9WgXcQ', title: 'x', author: 'y', lengthSeconds: 100 }]),
+      }),
+    )
+
+    await page.goto(`${BASE}/settings`)
+    await page.getByRole('button', { name: 'Tester les instances' }).click()
+
+    const rowA = page.locator('.instance-item', { hasText: 'inv-a.test' })
+    await expect(rowA.locator('.probe', { hasText: 'API' })).toHaveClass(/relay/, { timeout: 40_000 })
+    await expect(rowA.locator('.probe', { hasText: 'API' })).toContainText('relais')
+  })
 })

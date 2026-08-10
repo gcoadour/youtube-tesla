@@ -20,6 +20,13 @@ const THEME_OPTIONS: { value: ThemePreference; label: string; hint: string }[] =
   { value: 'dark', label: 'Sombre', hint: 'Toujours sombre' },
 ]
 
+/** Trois verdicts : direct, via relais, ou indisponible. */
+function ProbeBadge({ label, result }: { label: string; result: 'ok' | 'proxy' | 'ko' }) {
+  const tone = result === 'ko' ? 'down' : result === 'proxy' ? 'relay' : 'up'
+  const mark = result === 'ko' ? '✗' : result === 'proxy' ? '✓ relais' : '✓'
+  return <span className={`probe ${tone}`}>{label} {mark}</span>
+}
+
 interface CachedEntry {
   videoId: string
   size: number
@@ -197,7 +204,9 @@ export default function SettingsPage() {
               Les trois capacités sont indépendantes. « API » sert l'import, « Recherche » a son
               propre endpoint — souvent désactivé ou limité alors que le reste de l'API répond —
               et « Flux » sert la lecture, qui n'est pas soumise au CORS. Priorisez une instance
-              dont la colonne qui vous manque répond.
+              dont la colonne qui vous manque répond. Le test suit exactement le chemin de
+              l'application : direct d'abord, relais CORS ensuite. Un « ✓ relais » signifie que
+              la capacité fonctionne, mais en passant par un tiers.
             </p>
             <p className="settings-desc">
               Une instance peut très bien s'ouvrir dans un onglet et rester inutilisable ici :
@@ -209,15 +218,9 @@ export default function SettingsPage() {
                 <div key={d.origin} className="instance-item">
                   <span className="instance-kind">{d.kind}</span>
                   <span className="instance-origin">{d.origin.replace(/^https:\/\//, '')}</span>
-                  <span className={`probe ${d.api === 'ok' ? 'up' : 'down'}`}>
-                    API {d.api === 'ok' ? '✓' : '✗'}
-                  </span>
-                  <span className={`probe ${d.search === 'ok' ? 'up' : 'down'}`}>
-                    Recherche {d.search === 'ok' ? '✓' : '✗'}
-                  </span>
-                  <span className={`probe ${d.stream === 'ok' ? 'up' : 'down'}`}>
-                    Flux {d.stream === 'ok' ? '✓' : '✗'}
-                  </span>
+                  <ProbeBadge label="API" result={d.api} />
+                  <ProbeBadge label="Recherche" result={d.search} />
+                  <ProbeBadge label="Flux" result={d.stream} />
                   <button
                     className="icon-btn"
                     onClick={() => { prioritizeInstance(d.origin); refreshInstances() }}
