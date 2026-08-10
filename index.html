@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="fr" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <!-- viewport-fit=cover : l'écran Tesla n'a pas d'encoche, mais cela évite
@@ -9,6 +9,33 @@
     <meta name="description" content="Lecteur de musique YouTube sans publicité, pensé pour l'écran tactile Tesla." />
     <title>YouTube Music Tesla</title>
     <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+    <script>
+      /*
+       * Résolution du thème avant le premier rendu, pour éviter un flash de
+       * couleur au chargement. Volontairement dupliqué depuis
+       * src/services/theme.ts : ce script doit s'exécuter avant le bundle.
+       * L'attribut data-theme vaut « dark » dans le HTML, donc un échec ici
+       * laisse simplement le thème sombre en place.
+       */
+      (function () {
+        try {
+          var stored = localStorage.getItem('yt-theme') || 'auto'
+          var resolved =
+            stored === 'light' || stored === 'dark'
+              ? stored
+              : window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches
+                ? 'light'
+                : 'dark'
+          document.documentElement.setAttribute('data-theme', resolved)
+          if (resolved === 'light') {
+            var meta = document.querySelector('meta[name="theme-color"]')
+            if (meta) meta.setAttribute('content', '#ffffff')
+          }
+        } catch (e) {
+          /* thème sombre conservé */
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

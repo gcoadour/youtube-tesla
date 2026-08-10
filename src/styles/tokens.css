@@ -1,12 +1,23 @@
 /**
  * Jetons de design — cible : écran tactile Tesla, consulté en conduite.
  *
- * Deux règles gouvernent ces valeurs :
+ * Deux règles gouvernent les dimensions :
  *  - aucune cible interactive sous --touch-min (56 px), doigt et non souris ;
  *  - aucun texte utile sous 14 px, et 18 px pour le corps courant.
+ *
+ * Thème : le **sombre est la base**, appliqué par `:root`. C'est le bon défaut
+ * pour une voiture (conduite de nuit) et le comportement de repli si le script
+ * de thème d'index.html ne s'exécute pas.
+ *
+ * Le clair n'est qu'une surcharge de jetons sous `:root[data-theme='light']`.
+ * L'attribut est posé sur <html> par index.html avant le premier rendu, puis
+ * entretenu par services/theme.ts — ce qui évite de dupliquer la palette entre
+ * une requête média et un sélecteur d'attribut.
  */
 
 :root {
+  color-scheme: dark;
+
   /* Surfaces */
   --bg-base: #121212;
   --bg-elevated: #181818;
@@ -20,11 +31,32 @@
   --text-secondary: #b3b3b3;
   --text-subtle: #8a8a8a;
 
-  /* Accents */
+  /* Surface inversée : bouton de lecture, remplissages de barres. */
+  --surface-inverse: #ffffff;
+  --on-inverse: #000000;
+
+  /* Accent — deux jetons distincts : le vert Spotify passe en aplat mais pas
+     en texte sur fond clair, où il tombe sous le seuil de contraste. */
   --accent: #1ed760;
   --accent-hover: #1fdf64;
+  --accent-text: #1ed760;
+  --on-accent: #000000;
+
+  /* États */
   --danger: #f15e5e;
+  --warning: #e0a33e;
   --border: #333333;
+
+  /* Voile posé sur une image (pochette) : identique dans les deux thèmes,
+     puisqu'il ne recouvre pas une surface du thème mais une photo. */
+  --scrim: rgba(0, 0, 0, 0.78);
+  --scrim-soft: rgba(0, 0, 0, 0.65);
+  --on-scrim: #ffffff;
+
+  /* Ombres */
+  --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 6px 24px rgba(0, 0, 0, 0.6);
+  --shadow-lg: 0 12px 48px rgba(0, 0, 0, 0.7);
 
   /* Échelle typographique */
   --fs-label: 14px;
@@ -46,6 +78,39 @@
   --radius: 10px;
   --radius-lg: 16px;
   --transition: 160ms ease;
+}
+
+:root[data-theme='light'] {
+  /* color-scheme pilote le rendu natif des <select>, curseurs et ascenseurs :
+     sans lui ils resteraient sombres au milieu d'une interface claire. */
+  color-scheme: light;
+
+  --bg-base: #ffffff;
+  --bg-elevated: #f6f6f6;
+  --bg-highlight: #ececec;
+  --bg-pressed: #dedede;
+  --bg-rail: #f2f2f2;
+  --bg-overlay: rgba(0, 0, 0, 0.5);
+
+  --text-primary: #121212;
+  --text-secondary: #575757;
+  --text-subtle: #6b6b6b;
+
+  --surface-inverse: #121212;
+  --on-inverse: #ffffff;
+
+  --accent: #1db954;
+  --accent-hover: #19a34a;
+  --accent-text: #0a6127;
+  --on-accent: #000000;
+
+  --danger: #c62828;
+  --warning: #8a5a00;
+  --border: #d4d4d4;
+
+  --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.16);
+  --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.18);
+  --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.22);
 }
 
 /* Rail réduit aux icônes : l'espace horizontal passe au contenu. */

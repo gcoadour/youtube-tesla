@@ -88,6 +88,20 @@ export async function mockInstances(page: Page, options: {
   )
 }
 
+/**
+ * Coupe transitions et animations.
+ *
+ * Indispensable avant toute lecture de `getComputedStyle` : au changement de
+ * thème, les couleurs sont interpolées pendant 160 ms et une mesure prise
+ * pendant ce laps de temps renvoie une teinte intermédiaire qui n'existe dans
+ * aucune des deux palettes.
+ */
+export async function freezeMotion(page: Page) {
+  await page.addStyleTag({
+    content: '*, *::before, *::after { transition: none !important; animation: none !important; }',
+  })
+}
+
 /** Sert un vrai flux audio jouable, sans dépendre de YouTube. */
 export async function mockAudioStream(page: Page) {
   await page.route('**/latest_version**', (route) => route.fulfill(silentWav()))

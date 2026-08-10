@@ -66,7 +66,7 @@ img { max-width: 100%; }
   width: 28px;
   height: 28px;
   border: 3px solid var(--border);
-  border-top-color: var(--accent);
+  border-top-color: var(--accent-text);
   border-radius: 50%;
   animation: spin 600ms linear infinite;
 }
@@ -82,7 +82,7 @@ img { max-width: 100%; }
 }
 
 .success-text {
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: var(--fs-sm);
   width: 100%;
 }
@@ -104,7 +104,7 @@ img { max-width: 100%; }
 
 .btn-primary {
   background: var(--accent);
-  color: #000;
+  color: var(--on-accent);
 }
 
 .btn-primary:active:not(:disabled) { background: var(--accent-hover); }
@@ -128,5 +128,18 @@ img { max-width: 100%; }
   .btn-secondary:hover:not(:disabled) {
     border-color: var(--text-primary);
     color: var(--text-primary);
+  }
+}
+
+/* Respecte le réglage système « réduire les animations ». Les transitions ne
+   portent ici aucune information : les couper ne retire rien à l'interface. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

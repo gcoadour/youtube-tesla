@@ -114,22 +114,22 @@
   width: var(--touch-min);
   height: var(--touch-min);
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.78);
-  color: #fff;
+  background: var(--scrim);
+  color: var(--on-scrim);
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-sm);
 }
 
 .playlist-card-action:active { background: var(--danger); }
-.playlist-card-action.refresh:active { background: var(--accent); color: #000; }
+.playlist-card-action.refresh:active { background: var(--accent); color: var(--on-accent); }
 
 .playlist-card-badge {
   display: inline-block;
   margin-top: 8px;
   font-size: 13px;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -150,7 +150,7 @@
   height: 232px;
   border-radius: var(--radius);
   object-fit: cover;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  box-shadow: var(--shadow-md);
   flex-shrink: 0;
 }
 
@@ -223,7 +223,7 @@
 .track-item:active { background: var(--bg-pressed); }
 .track-item.active { background: var(--bg-highlight); }
 .track-item.active .col-num,
-.track-item.active .col-title { color: var(--accent); }
+.track-item.active .col-title { color: var(--accent-text); }
 
 .col-num {
   width: 36px;
@@ -296,13 +296,13 @@
   transition: color var(--transition), background var(--transition);
 }
 
-.track-download.cached { color: var(--accent); }
+.track-download.cached { color: var(--accent-text); }
 .track-download:active { background: var(--bg-pressed); }
 
 @media (hover: hover) and (pointer: fine) {
   .track-item:hover { background: var(--bg-highlight); }
   .track-download:hover { color: var(--text-primary); }
-  .track-download.cached:hover { color: var(--accent-hover); }
+  .track-download.cached:hover { color: var(--accent); }
 }
 
 /* Recherche ---------------------------------------------------------------- */
@@ -390,7 +390,7 @@
 }
 
 .warning-text {
-  color: #e0a33e;
+  color: var(--warning);
   font-size: var(--fs-sm);
   width: 100%;
 }
@@ -502,7 +502,7 @@
   color: var(--text-secondary);
 }
 
-.instance-state.up { color: var(--accent); }
+.instance-state.up { color: var(--accent-text); }
 .instance-state.down { color: var(--danger); }
 
 .cache-track-size {
@@ -576,6 +576,57 @@
 }
 
 .settings-link {
-  color: var(--accent);
+  color: var(--accent-text);
   text-decoration: underline;
+}
+
+/* Sélecteur de thème ------------------------------------------------------- */
+
+.theme-options {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.theme-option {
+  flex: 1;
+  min-width: 180px;
+  min-height: var(--touch-lg);
+  padding: 14px 20px;
+  border-radius: var(--radius);
+  border: 2px solid var(--border);
+  background: var(--bg-highlight);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  transition: border-color var(--transition), background var(--transition);
+}
+
+.theme-option:active { background: var(--bg-pressed); }
+
+/* L'état sélectionné ne repose pas que sur la couleur : la bordure épaisse
+   reste lisible en plein soleil comme pour un daltonien. */
+.theme-option.selected {
+  border-color: var(--accent);
+  background: var(--bg-pressed);
+}
+
+.theme-option-label {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.theme-option.selected .theme-option-label { color: var(--accent-text); }
+
+.theme-option-hint {
+  font-size: var(--fs-label);
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .theme-option:hover { border-color: var(--text-secondary); }
+  .theme-option.selected:hover { border-color: var(--accent); }
 }

@@ -4,7 +4,15 @@ import {
   getInstances, checkInstances, addUserInstance, removeUserInstance, prioritizeInstance,
 } from '../services/instances'
 import type { Instance, InstanceKind } from '../services/instances'
+import { getThemePreference, setThemePreference, resolveTheme, watchSystemTheme } from '../services/theme'
+import type { ThemePreference } from '../services/theme'
 import { TrashIcon, ArrowUpIcon, RefreshIcon } from '../components/common/Icons'
+
+const THEME_OPTIONS: { value: ThemePreference; label: string; hint: string }[] = [
+  { value: 'auto', label: 'Automatique', hint: 'Suit le réglage du navigateur' },
+  { value: 'light', label: 'Clair', hint: 'Toujours clair' },
+  { value: 'dark', label: 'Sombre', hint: 'Toujours sombre' },
+]
 
 interface CachedEntry {
   videoId: string
@@ -23,6 +31,9 @@ export default function SettingsPage() {
   const [cachedTracks, setCachedTracks] = useState<CachedEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [confirmClear, setConfirmClear] = useState(false)
+
+  const [theme, setTheme] = useState<ThemePreference>(getThemePreference)
+  const [resolved, setResolved] = useState(() => resolveTheme(getThemePreference()))
 
   const [instances, setInstances] = useState<Instance[]>([])
   const [checking, setChecking] = useState(false)
@@ -45,6 +56,15 @@ export default function SettingsPage() {
   const refreshInstances = useCallback(() => setInstances(getInstances()), [])
 
   useEffect(() => { refreshCache() }, [refreshCache])
+
+  // En mode automatique, le libellé doit refléter le basculement jour/nuit du
+  // navigateur sans attendre un rechargement.
+  useEffect(() => watchSystemTheme(setResolved), [])
+
+  const handleTheme = (value: ThemePreference) => {
+    setTheme(value)
+    setResolved(setThemePreference(value))
+  }
 
   // L'annuaire est récupéré de façon asynchrone : afficher `getInstances()` au
   // montage montrerait la liste d'amorçage, pas celle réellement utilisée.
@@ -86,6 +106,31 @@ export default function SettingsPage() {
   return (
     <div className="page settings-page">
       <h1 className="page-title">Réglages</h1>
+
+      <section className="settings-section">
+        <h2>Apparence</h2>
+        <p className="settings-desc">
+          En mode automatique, l'application suit le thème du navigateur — donc le passage
+          jour/nuit de la voiture lorsque celle-ci le transmet.
+        </p>
+
+        <div className="theme-options" role="radiogroup" aria-label="Thème">
+          {THEME_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              className={`theme-option ${theme === option.value ? 'selected' : ''}`}
+              onClick={() => handleTheme(option.value)}
+              role="radio"
+              aria-checked={theme === option.value}
+            >
+              <span className="theme-option-label">{option.label}</span>
+              <span className="theme-option-hint">
+                {option.value === 'auto' ? `${option.hint} — actuellement ${resolved === 'dark' ? 'sombre' : 'clair'}` : option.hint}
+              </span>
+            </button>
+          ))}
+        </div>
+      </section>
 
       <section className="settings-section">
         <h2>Sources</h2>

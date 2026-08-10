@@ -59,11 +59,11 @@
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.65);
+  background: var(--scrim-soft);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  color: var(--on-scrim);
   pointer-events: none;
 }
 
@@ -97,7 +97,7 @@
   transition: color var(--transition);
 }
 
-.npb-like.liked { color: var(--accent); }
+.npb-like.liked { color: var(--accent-text); }
 
 .npb-center {
   flex: 1;
@@ -135,7 +135,7 @@
   gap: 16px;
   font-size: var(--fs-sm);
   color: var(--text-primary);
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.6);
+  box-shadow: var(--shadow-md);
 }
 
 .playback-error-close {
@@ -169,23 +169,23 @@
 }
 
 .control-btn:active:not(:disabled) { background: var(--bg-pressed); }
-.control-btn.active { color: var(--accent); }
+.control-btn.active { color: var(--accent-text); }
 
 .play-btn {
   width: var(--touch-lg);
   height: var(--touch-lg);
-  background: var(--text-primary);
-  color: #000;
+  background: var(--surface-inverse);
+  color: var(--on-inverse);
 }
 
-.play-btn:active:not(:disabled) { background: var(--accent); }
+.play-btn:active:not(:disabled) { background: var(--accent); color: var(--on-accent); }
 
 @media (hover: hover) and (pointer: fine) {
   .control-btn:hover:not(:disabled) { color: var(--text-primary); }
-  .control-btn.active:hover { color: var(--accent-hover); }
-  .play-btn:hover:not(:disabled) { color: #000; transform: scale(1.04); }
+  .control-btn.active:hover { color: var(--accent); }
+  .play-btn:hover:not(:disabled) { transform: scale(1.04); }
   .npb-like:hover { color: var(--text-primary); }
-  .npb-like.liked:hover { color: var(--accent-hover); }
+  .npb-like.liked:hover { color: var(--accent); }
 }
 
 /* Barre de progression ----------------------------------------------------- */
@@ -228,7 +228,7 @@
 
 .progress-fill {
   height: 100%;
-  background: var(--text-primary);
+  background: var(--surface-inverse);
   border-radius: 6px;
   transition: width 120ms linear;
 }
@@ -246,9 +246,9 @@
   height: 26px;
   margin-left: -13px;
   border-radius: 50%;
-  background: var(--text-primary);
+  background: var(--surface-inverse);
   transform: translateY(-50%);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  box-shadow: var(--shadow-sm);
   transition: left 120ms linear;
 }
 
@@ -283,7 +283,7 @@
 
 .volume-fill {
   height: 100%;
-  background: var(--text-primary);
+  background: var(--surface-inverse);
   border-radius: 5px;
   pointer-events: none;
 }
@@ -340,7 +340,7 @@
   color: var(--text-secondary);
 }
 
-.npv-icon-btn.liked { color: var(--accent); }
+.npv-icon-btn.liked { color: var(--accent-text); }
 .npv-icon-btn:active { background: var(--bg-pressed); }
 
 /* Deux colonnes en paysage (le cas Tesla), empilé en portrait. */
@@ -358,7 +358,7 @@
   height: min(42vh, 420px);
   border-radius: var(--radius-lg);
   object-fit: cover;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.7);
+  box-shadow: var(--shadow-lg);
   flex-shrink: 0;
 }
 
